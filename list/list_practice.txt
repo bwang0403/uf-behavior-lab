@@ -1,0 +1,10 @@
+apple
+chair
+pencil
+window
+flower
+bottle
+clock
+blanket
+candle
+pillow

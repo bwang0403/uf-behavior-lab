@@ -1,0 +1,6 @@
+faster-whisper
+sounddevice
+soundfile
+numpy
+pyyaml
+flask

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Experiment</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f; display: flex; align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden; font-family: 'Courier New', monospace; cursor: none;
+  }
+  #stage { position: relative; width: 520px; height: 520px; }
+  svg { width: 100%; height: 100%; }
+  #time-display {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -60%);
+    color: #f0f0f8; font-size: 88px; font-weight: bold; letter-spacing: -2px;
+  }
+  #sec-label {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, 34px);
+    color: #5a5a7a; font-size: 13px; letter-spacing: 4px;
+  }
+  #status-text {
+    position: absolute; bottom: -52px; left: 50%; transform: translateX(-50%);
+    color: #5a5a7a; font-size: 13px; letter-spacing: 2px; white-space: nowrap;
+  }
+  .overlay { display: none; position: fixed; inset: 0; align-items: center; justify-content: center; z-index: 100; }
+  .overlay.show { display: flex; }
+  #instruction-overlay { background: #0a0a0f; }
+  #instruction-text { color: #f0f0f8; font-size: 22px; text-align: center; line-height: 1.9; max-width: 680px; white-space: pre-line; }
+  #pause-overlay { background: rgba(10,10,15,.93); z-index: 200; }
+  #pause-text { color: #e0a020; font-size: 48px; font-weight: bold; letter-spacing: 8px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <svg viewBox="0 0 520 520">
+    <g id="dots"></g>
+    <circle cx="260" cy="260" r="210" fill="none" stroke="#2a2a3a" stroke-width="18"/>
+    <circle id="arc" cx="260" cy="260" r="210" fill="none" stroke="#4f8fff" stroke-width="18"
+            stroke-dasharray="1319" stroke-dashoffset="1319" stroke-linecap="round" transform="rotate(-90 260 260)"/>
+    <circle cx="260" cy="260" r="5" fill="#5a5a7a"/>
+  </svg>
+  <div id="time-display">—</div>
+  <div id="sec-label">SEC</div>
+  <div id="status-text">WAITING TO START</div>
+</div>
+<div id="instruction-overlay" class="overlay"><div id="instruction-text"></div></div>
+<div id="pause-overlay" class="overlay"><div id="pause-text">PAUSED</div></div>
+
+<script>
+const CIRC = 2 * Math.PI * 210;
+const arc          = document.getElementById('arc');
+const timeDisplay  = document.getElementById('time-display');
+const statusText   = document.getElementById('status-text');
+const instrOverlay = document.getElementById('instruction-overlay');
+const instrText    = document.getElementById('instruction-text');
+const pauseOverlay = document.getElementById('pause-overlay');
+
+let windowSeconds = 3, timeLeft = 0, timerId = null, lastSeq = 0;
+
+// Dot grid
+(function() {
+  const g = document.getElementById('dots'), cx = 260, cy = 260;
+  for (let x = 0; x <= 520; x += 44)
+    for (let y = 0; y <= 520; y += 44) {
+      const dist = Math.hypot(x-cx, y-cy);
+      if (dist > 580) continue;
+      const v = Math.round(22 * Math.max(0, 1 - dist/580));
+      const d = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      d.setAttribute('cx',x); d.setAttribute('cy',y); d.setAttribute('r',1.5);
+      d.setAttribute('fill',`rgb(${v},${v},${Math.min(255,v+8)})`);
+      g.appendChild(d);
+    }
+})();
+
+function arcColor(ratio) {
+  let r,g,b;
+  if (ratio > .5) { const t=(ratio-.5)/.5; r=Math.round(0x4f*t+0xff*(1-t)); g=Math.round(0x8f*t+0xb8*(1-t)); b=Math.round(0xff*t+0x30*(1-t)); }
+  else            { const t=ratio/.5;      r=0xff;                           g=Math.round(0x5f*(1-t)+0xb8*t); b=Math.round(0x57*(1-t)+0x30*t); }
+  return `rgb(${r},${g},${b})`;
+}
+function renderArc(ratio) {
+  arc.setAttribute('stroke-dashoffset', CIRC*(1-ratio));
+  arc.setAttribute('stroke', ratio > 0 ? arcColor(ratio) : '#4f8fff');
+}
+
+function startCycle(secs) {
+  windowSeconds = secs; timeLeft = secs; statusText.textContent = '';
+  clearInterval(timerId);
+  timerId = setInterval(() => {
+    timeLeft = Math.max(0, timeLeft - 0.1);
+    timeDisplay.textContent = timeLeft.toFixed(1);
+    renderArc(timeLeft / windowSeconds);
+    if (timeLeft <= 0) clearInterval(timerId);
+  }, 100);
+}
+
+function stopCycle() {
+  clearInterval(timerId);
+  renderArc(0); timeDisplay.textContent = '—'; statusText.textContent = 'WAITING';
+}
+
+// ── Polling ───────────────────────────────────────────────────────────────────
+function handleEvent(event, data) {
+  switch(event) {
+    case 'cycle_start':      startCycle(data.window_seconds); break;
+    case 'cycle_end':        stopCycle(); break;
+    case 'iti_change':       if (data.active) statusText.textContent = ''; break;
+    case 'instruction':
+      instrText.textContent = data.text.trim();
+      instrOverlay.classList.add('show'); break;
+    case 'instruction_done':
+      instrOverlay.classList.remove('show');
+      statusText.textContent = 'WAITING TO START';
+      renderArc(0); timeDisplay.textContent = '—'; break;
+    case 'pause_change':
+      if (data.paused) { clearInterval(timerId); pauseOverlay.classList.add('show'); }
+      else pauseOverlay.classList.remove('show'); break;
+    case 'session_started':  statusText.textContent = 'STARTING...'; break;
+    case 'session_ended':    stopCycle(); statusText.textContent = 'SESSION COMPLETE'; break;
+    case 'session_stopped':  stopCycle(); break;
+  }
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/poll?since=' + lastSeq);
+    const events = await r.json();
+    for (const e of events) { handleEvent(e.event, e.data); lastSeq = Math.max(lastSeq, e.seq); }
+  } catch(_) {}
+  setTimeout(poll, 200);
+}
+poll();
+</script>
+</body>
+</html>
