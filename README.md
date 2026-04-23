@@ -205,6 +205,27 @@ After the first download, the model loads from cache (no internet needed).
 
 2. Verify the word lists are finalized in `list/`.
 
+### Research Decisions To Finalize Before Data Collection
+
+Before running real participants, the research team should explicitly finalize the items below and keep them stable across sessions unless the protocol says otherwise:
+
+- **Participant assignment**
+  `experiment.participant_id` naming convention, plus whether the participant is assigned to the 2-list or 3-list group via `experiment.group`.
+- **Final stimulus sets**
+  The exact contents of `list1`, `list2`, `list3`, and the practice list. The matcher treats regular singular/plural forms as equivalent, but it does **not** handle irregular plurals well (`person/people`, `mouse/mice`), so lists should avoid those forms or the code should be extended first.
+- **Phase-switching rule**
+  The threshold for `switching.no_response_streak`, and whether manual `NEXT PHASE` presses are allowed in the actual protocol or only during pilot/testing sessions.
+- **Timing parameters**
+  `trial.window_seconds`, `trial.min_response_gap`, and `trial.iti_seconds`. These determine how long a participant can respond, how much post-speech silence ends a recording, and the gap between cycles.
+- **ASR settings**
+  `asr.model_size` and `asr.language`. The default CPU-friendly setting is `base`, but if recognition accuracy is not acceptable in pilot runs, decide whether to move to `small`.
+- **Practice-round policy**
+  Whether `practice.enabled` stays on, how long practice should run (`practice.no_response_streak`), and what instruction text is shown before practice.
+- **Instruction wording**
+  The exact text shown in `instructions.intro`, `instructions.between_phases`, and `instructions.end`, because those prompts become part of the participant-facing procedure.
+- **Analysis rule for resurgence**
+  The current code counts resurgence as a **List-1 response in Phase 3 that is not a repeat**. Confirm this matches the intended analysis plan before collecting formal data.
+
 ### Starting the Server
 
 ```bash
@@ -591,9 +612,10 @@ while self.running and self.current_phase_idx < len(phases):
 
 ### Research Parameters (To Be Confirmed)
 
-- [ ] Exact word lists — current lists are placeholders; professor and grad students will finalize
-- [ ] `no_response_streak` threshold value — confirm from literature
-- [ ] Whether `window_seconds` should differ between phases
+- [ ] Exact word lists — finalize the real stimuli in `list/` before data collection
+- [ ] `no_response_streak` threshold value — confirm the final switching rule from the protocol/literature
+- [ ] Whether `window_seconds`, `min_response_gap`, or `iti_seconds` should differ between phases
+- [ ] Whether manual `NEXT PHASE` overrides are allowed outside pilot/testing sessions
 - [ ] Whether to track inter-response time *across* cycles (currently only within-cycle RT is logged)
 - [ ] Definition of resurgence for analysis — currently: any List-1 response in Phase 3 that is not a repeat
 

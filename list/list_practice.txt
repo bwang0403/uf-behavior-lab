@@ -1,10 +1,10 @@
 apple
-chair
+mountain
 pencil
 window
 flower
 bottle
-clock
-blanket
+river
+cloud
 candle
-pillow
+stone

@@ -83,7 +83,6 @@ def cmd(action):
 
         from trial_loop import ExperimentRunner
         _runner = ExperimentRunner("config.yaml", model=_model)
-        window_secs = _runner.cfg["trial"]["window_seconds"]
 
         _runner.on_status = lambda ph, cy, resp, rem: _push("status_update", {
             "phase": ph, "cycle": cy, "last_response": resp, "remaining": rem,
@@ -92,17 +91,8 @@ def cmd(action):
         _runner.on_pause       = lambda paused: _push("pause_change", {"paused": paused})
         _runner.on_instruction = lambda text:   _push("instruction",  {"text": text})
         _runner.on_complete    = lambda s:      _push("session_complete", {"summary": s})
-
-        import audio as _audio
-        _orig = _audio.record_until_silence
-
-        def _hooked(*a, **kw):
-            _push("cycle_start", {"window_seconds": window_secs})
-            result = _orig(*a, **kw)
-            _push("cycle_end")
-            return result
-
-        _audio.record_until_silence = _hooked
+        _runner.on_cycle_start = lambda secs:   _push("cycle_start", {"window_seconds": secs})
+        _runner.on_cycle_end   = lambda:        _push("cycle_end")
 
         def _run():
             global _runner
@@ -114,7 +104,6 @@ def cmd(action):
                 traceback.print_exc()
                 _push("server_error", {"message": "Experiment crashed — see terminal."})
             finally:
-                _audio.record_until_silence = _orig
                 if _runner is not None:
                     _runner.running = False
                 _runner = None

@@ -19,15 +19,14 @@ BASE_DIR = Path(__file__).parent
 
 def check_dependencies():
     missing = []
-    for pkg in ["faster_whisper", "sounddevice", "soundfile", "numpy", "yaml",
-                "flask", "flask_socketio"]:
+    for pkg in ["faster_whisper", "sounddevice", "soundfile", "numpy", "yaml", "flask"]:
         try:
             __import__(pkg)
         except ImportError:
             missing.append(pkg)
     if missing:
         print("Missing packages:", ", ".join(missing))
-        print("Run: pip install faster-whisper sounddevice soundfile pygame numpy pyyaml flask flask-socketio")
+        print("Run: pip install -r requirements.txt")
         sys.exit(1)
 
 

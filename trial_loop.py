@@ -39,6 +39,7 @@ def resolve(relative_path: str) -> str:
 
 
 # ─── ASR ──────────────────────────────────────────────────────────────────────
+import re
 
 # Common English filler words to skip when extracting the participant's response
 _FILLERS = {
@@ -46,22 +47,38 @@ _FILLERS = {
     "so", "well", "yeah", "yes", "no", "the", "a", "an",
 }
 
-
-def transcribe(model: WhisperModel, wav_path: str, language: str = "en") -> str:
+def transcribe(model: WhisperModel, wav_path: str, language: str = "en") -> tuple[str, str]:
     """
-    Run Whisper on a wav file. Return the first non-filler word spoken.
-    Collects all words from transcription then skips known filler words.
+    Run Whisper on a wav file.
+    Return:
+    - the first non-filler word spoken
+    - the full transcript text for logging / later review
+
+    Uses Regex to replace non-alphabet characters with spaces, preventing 
+    Whisper from merging words (e.g., "um...apple" -> "um apple").
     """
     segments, _ = model.transcribe(wav_path, language=language)
-    all_words = []
-    for seg in segments:
-        all_words.extend(seg.text.strip().split())
 
-    for raw_word in all_words:
-        cleaned = raw_word.lower().strip(".,!?'\"")
-        if cleaned and cleaned not in _FILLERS:
-            return cleaned
-    return ""
+    transcript_parts = []
+    words = []
+    for seg in segments:
+        seg_text = (seg.text or "").strip()
+        if seg_text:
+            transcript_parts.append(seg_text)
+
+        # 1. Replace all punctuation and special characters with spaces
+        clean_text = re.sub(r'[^a-zA-Z\s]', ' ', seg.text or "")
+
+        # 2. Split the cleaned text into individual words
+        words.extend(clean_text.split())
+
+    transcript = " ".join(transcript_parts).strip()
+    for w in words:
+        w_lower = w.lower()
+        if w_lower and w_lower not in _FILLERS:
+            return w_lower, transcript
+
+    return "", transcript
 
 
 # ─── Phase Logic ──────────────────────────────────────────────────────────────
@@ -119,6 +136,8 @@ class ExperimentRunner:
         self.on_pause       = None   # callback(paused: bool)
         self.on_instruction = None   # callback(text: str) — show instruction screen
         self.on_complete    = None   # callback(summary: dict) — session finished
+        self.on_cycle_start = None   # callback(window_seconds: float)
+        self.on_cycle_end   = None   # callback()
 
         self._pause_event = threading.Event()
         self._pause_event.set()  # starts in "not paused" (set = go)
@@ -173,6 +192,7 @@ class ExperimentRunner:
     def stop(self):
         self.running = False
         self._pause_event.set()  # unblock if currently paused
+        self._instruction_event.set()  # unblock if waiting on an instruction screen
 
     def pause(self):
         self._pause_event.clear()
@@ -199,6 +219,22 @@ class ExperimentRunner:
             self.on_instruction(text)
             self._instruction_event.wait()  # blocks until acknowledge_instruction()
 
+    def _record_response(self) -> tuple[str | None, float | None]:
+        """Record one response window using the experiment config."""
+        window_seconds = self.cfg["trial"]["window_seconds"]
+        if self.on_cycle_start:
+            self.on_cycle_start(window_seconds)
+        try:
+            return record_until_silence(
+                window_seconds=window_seconds,
+                sample_rate=self.cfg["audio"]["sample_rate"],
+                channels=self.cfg["audio"].get("channels", 1),
+                silence_cutoff=self.cfg["trial"].get("min_response_gap", 0.4),
+            )
+        finally:
+            if self.on_cycle_end:
+                self.on_cycle_end()
+
     def acknowledge_instruction(self):
         """Called by GUI when experimenter clicks Continue after an instruction screen."""
         self._instruction_event.set()
@@ -216,12 +252,12 @@ class ExperimentRunner:
         Results are not logged. Word list is separate from experiment lists.
         """
         practice_cfg = self.cfg.get("practice", {})
-        if not practice_cfg.get("enabled", False):
+        if not self.running or not practice_cfg.get("enabled", False):
             return
 
         list_path = resolve(practice_cfg["list"])
         if not os.path.exists(list_path):
-            print(f"  [Practice] List not found: {list_path} — skipping practice.")
+            print(f"  [Practice] List not found: {list_path} - skipping practice.")
             return
 
         streak_limit = practice_cfg.get("no_response_streak", 3)
@@ -231,6 +267,8 @@ class ExperimentRunner:
         prac_instr = practice_cfg.get("instruction", "")
         if prac_instr:
             self._show_instruction(prac_instr)
+            if not self.running:
+                return
 
         # Load practice words into a temporary ListManager
         practice_manager = ListManager({99: list_path})  # list 99 = practice
@@ -245,16 +283,13 @@ class ExperimentRunner:
                 break
 
             cycle += 1
-            wav_path, response_time = record_until_silence(
-                window_seconds=trial_cfg["window_seconds"],
-                sample_rate=self.cfg["audio"]["sample_rate"],
-            )
+            wav_path, response_time = self._record_response()
 
             if wav_path is None:
                 streak += 1
                 print(f"  [Practice] Cycle {cycle:02d} | No response (streak: {streak})")
             else:
-                word = transcribe(self.model, wav_path, self.cfg["asr"]["language"])
+                word, transcript = transcribe(self.model, wav_path, self.cfg["asr"]["language"])
                 cleanup_audio_file(wav_path)
 
                 if not word:
@@ -262,11 +297,11 @@ class ExperimentRunner:
                     print(f"  [Practice] Cycle {cycle:02d} | Unintelligible (streak: {streak})")
                 else:
                     streak = 0
-                    result = practice_manager.match(word)
+                    result = practice_manager.match(word, raw_response=transcript)
                     reinforce = (result["list"] == 99 and not result["repeat"])
                     if reinforce:
                         play_reinforcement(self.reward_path)
-                    tag = "[✓]" if reinforce else f"[{result.get('list', 'novel')}]"
+                    tag = "[REINFORCED]" if reinforce else f"[{result.get('list', 'novel')}]"
                     print(f"  [Practice] Cycle {cycle:02d} | '{word}' {tag}")
 
             iti = trial_cfg.get("iti_seconds", 0)
@@ -297,7 +332,8 @@ class ExperimentRunner:
             self._show_instruction(intro_text)
 
         # Run practice round (no-op if disabled)
-        self._run_practice()
+        if self.running:
+            self._run_practice()
 
         while self.running and self.current_phase_idx < len(self.cfg["phases"]):
             phase = self.current_phase
@@ -317,10 +353,7 @@ class ExperimentRunner:
             self.cycle += 1
 
             # Record
-            wav_path, response_time = record_until_silence(
-                window_seconds=trial_cfg["window_seconds"],
-                sample_rate=self.cfg["audio"]["sample_rate"],
-            )
+            wav_path, response_time = self._record_response()
 
             if wav_path is None:
                 # No response this cycle
@@ -331,26 +364,35 @@ class ExperimentRunner:
                     timestamp=cycle_start,
                 )
                 print(f"  Cycle {self.cycle:03d} | No response (streak: {self.no_response_streak})")
-                self._update_status(response="—")
+                self._update_status(response="-")
 
             else:
                 # Transcribe
-                word = transcribe(self.model, wav_path, self.cfg["asr"]["language"])
+                word, transcript = transcribe(self.model, wav_path, self.cfg["asr"]["language"])
                 cleanup_audio_file(wav_path)
 
                 if not word:
                     # Whisper returned empty (noise, breath, etc.)
                     self.no_response_streak += 1
-                    self.logger.log_no_response(
+                    self.logger.log_trial(
                         phase=self.phase_number,
                         cycle=self.cycle,
                         timestamp=cycle_start,
+                        match_result={
+                            "raw": transcript or None,
+                            "word": None,
+                            "list": None,
+                            "novel": False,
+                            "repeat": False,
+                        },
+                        reinforced=False,
+                        response_time=response_time,
                     )
                     print(f"  Cycle {self.cycle:03d} | Unintelligible audio (streak: {self.no_response_streak})")
                     self._update_status(response="?")
                 else:
                     self.no_response_streak = 0
-                    match_result = self.list_manager.match(word)
+                    match_result = self.list_manager.match(word, raw_response=transcript)
                     reinforced = should_reinforce(match_result, reinforced_list)
 
                     if reinforced:
@@ -371,10 +413,10 @@ class ExperimentRunner:
                     elif match_result["repeat"]:
                         tag = "[REPEAT]"
                     elif reinforced:
-                        tag = "[✓ REINFORCED]"
+                        tag = "[REINFORCED]"
 
                     print(
-                        f"  Cycle {self.cycle:03d} | '{word}' → "
+                        f"  Cycle {self.cycle:03d} | '{word}' -> "
                         f"List {match_result['list']} {tag} | rt={response_time:.2f}s"
                     )
                     self._update_status(response=word)
@@ -400,7 +442,7 @@ class ExperimentRunner:
                     reinforced_list=reinforced_list,
                 )
             if switch:
-                print(f"\n  → Phase switch: {reason}")
+                print(f"\n  -> Phase switch: {reason}")
                 self.no_response_streak = 0
                 self.current_phase_idx += 1
                 # Show between-phase instruction if there is a next phase

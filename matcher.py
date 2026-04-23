@@ -76,9 +76,13 @@ class ListManager:
         with open(path, "r", encoding="utf-8") as f:
             return {line.strip().lower() for line in f if line.strip()}
 
-    def match(self, response: str) -> dict:
+    def match(self, response: str, raw_response: str | None = None) -> dict:
         """
         Try to match a response against all available words across all lists.
+
+        Args:
+            response: The normalized word chosen for matching.
+            raw_response: Optional full ASR transcript to preserve in logs.
 
         Returns a result dict:
         {
@@ -89,9 +93,10 @@ class ListManager:
             "repeat":     True if word was already used,
         }
         """
-        raw = response.strip().lower()
+        raw = (raw_response if raw_response is not None else response).strip().lower()
+        selected = response.strip().lower()
         # Strip punctuation Whisper might add
-        word = re.sub(r"[^a-z\-]", "", raw)
+        word = re.sub(r"[^a-z\-]", "", selected)
 
         if not word:
             return {"raw": raw, "word": None, "list": None, "novel": False, "repeat": False}
@@ -130,12 +135,12 @@ class ListManager:
 # ─── Quick Test ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import os
+    from pathlib import Path
 
-    base = os.path.dirname(os.path.dirname(__file__))
+    base = Path(__file__).parent
     manager = ListManager({
-        1: os.path.join(base, "lists/list1_animals.txt"),
-        2: os.path.join(base, "lists/list2_professions.txt"),
+        1: str(base / "list" / "list1_animals.txt"),
+        2: str(base / "list" / "list2_professions.txt"),
     })
 
     tests = ["cat", "cats", "CAT", "dogs", "doctor", "Doctors", "kitten", "cat"]
