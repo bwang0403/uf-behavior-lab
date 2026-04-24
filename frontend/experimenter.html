@@ -135,6 +135,15 @@
     line-height: 1;
   }
 
+  .metric-wide {
+    grid-column: span 2;
+  }
+
+  #v-target {
+    font-size: 22px;
+    line-height: 1.12;
+  }
+
   .controls {
     padding: 20px;
     display: grid;
@@ -257,6 +266,7 @@
           <div class="metric"><span>Participant</span><strong id="v-pid">--</strong></div>
           <div class="metric"><span>Group</span><strong id="v-grp">--</strong></div>
           <div class="metric"><span>Phase</span><strong id="v-phase">--</strong></div>
+          <div class="metric metric-wide"><span>Current rule</span><strong id="v-target">Waiting to start</strong></div>
           <div class="metric"><span>Cycle</span><strong id="v-cycle">--</strong></div>
           <div class="metric"><span>Last response</span><strong id="v-resp">--</strong></div>
           <div class="metric"><span>List remaining</span><strong id="v-rem">--</strong></div>
@@ -350,6 +360,9 @@ function handleEvent(event, data) {
       setRunning(true);
       setStatus('Session running', 'The participant screen will show instructions or a countdown.', 'good');
       break;
+    case 'phase_change':
+      updatePhaseContext(data);
+      break;
     case 'cycle_start':
       setStatus('Speak now', `Participant should say one clear word during this ${data.window_seconds}s window.`, 'good');
       break;
@@ -376,7 +389,9 @@ function handleEvent(event, data) {
       setStatus('Session ended', 'Data has been saved if the session closed normally.', 'info');
       break;
     case 'status_update':
-      $('v-phase').textContent = data.phase;
+      if (!$('v-phase').textContent || $('v-phase').textContent === '--') {
+        $('v-phase').textContent = `Phase ${data.phase}`;
+      }
       $('v-cycle').textContent = data.cycle;
       $('v-resp').textContent = data.last_response || '--';
       $('v-rem').textContent = data.remaining;
@@ -440,6 +455,19 @@ function setRunning(on) {
   setBtn('btn-stop', on);
   setBtn('btn-pause', on);
   setBtn('btn-next', on);
+}
+
+function updatePhaseContext(data) {
+  const name = data.name || (data.phase === 'practice' ? 'Practice Round' : `Phase ${data.phase}`);
+  $('v-phase').textContent = name;
+  $('v-target').textContent = data.target || '--';
+  if (data.mode === 'practice') {
+    setStatus('Practice round', 'Practice words can earn the chime. Formal data is not logged during practice.', 'info');
+  } else if (data.reinforced_list === null) {
+    setStatus(name, 'Extinction phase: responses are recorded, but no words earn the chime.', 'busy');
+  } else {
+    setStatus(name, `Current rule: ${data.target}.`, 'info');
+  }
 }
 
 function renderSummary(summary) {

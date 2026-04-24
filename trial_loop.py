@@ -139,6 +139,7 @@ class ExperimentRunner:
         self.on_cycle_start = None   # callback(window_seconds: float)
         self.on_cycle_end   = None   # callback()
         self.on_reinforcement = None # callback(info: dict) — chime was triggered
+        self.on_phase_change = None  # callback(info: dict) — practice/phase context changed
 
         self._pause_event = threading.Event()
         self._pause_event.set()  # starts in "not paused" (set = go)
@@ -236,6 +237,26 @@ class ExperimentRunner:
             if self.on_cycle_end:
                 self.on_cycle_end()
 
+    def _phase_context(self, phase: dict | None = None) -> dict:
+        """Return display metadata for the current formal experiment phase."""
+        phase = phase or self.current_phase
+        reinforced_list = phase.get("reinforced_list")
+        if reinforced_list is None:
+            target = "Extinction: no chime for any word"
+        else:
+            target = f"List {reinforced_list} earns chime"
+        return {
+            "mode": "experiment",
+            "phase": self.phase_number,
+            "name": phase.get("name", f"Phase {self.phase_number}"),
+            "reinforced_list": reinforced_list,
+            "target": target,
+        }
+
+    def _notify_phase_change(self, info: dict):
+        if self.on_phase_change:
+            self.on_phase_change(info)
+
     def acknowledge_instruction(self):
         """Called by GUI when experimenter clicks Continue after an instruction screen."""
         self._instruction_event.set()
@@ -275,6 +296,13 @@ class ExperimentRunner:
         practice_manager = ListManager({99: list_path})  # list 99 = practice
 
         print("\n--- Practice Round ---")
+        self._notify_phase_change({
+            "mode": "practice",
+            "phase": "practice",
+            "name": "Practice Round",
+            "reinforced_list": "practice",
+            "target": "Practice list earns chime",
+        })
         streak = 0
         cycle  = 0
 
@@ -350,6 +378,7 @@ class ExperimentRunner:
             if self.current_phase_idx != self._last_printed_phase:
                 print(f"--- {phase['name']} | Reinforcing List {reinforced_list} ---")
                 self._last_printed_phase = self.current_phase_idx
+                self._notify_phase_change(self._phase_context(phase))
 
             # ── Pause check ───────────────────────────────────────────────────
             self._wait_if_paused()

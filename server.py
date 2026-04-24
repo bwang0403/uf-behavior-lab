@@ -94,6 +94,7 @@ def cmd(action):
         _runner.on_cycle_start = lambda secs:   _push("cycle_start", {"window_seconds": secs})
         _runner.on_cycle_end   = lambda:        _push("cycle_end")
         _runner.on_reinforcement = lambda info: _push("reinforcement", info)
+        _runner.on_phase_change = lambda info:  _push("phase_change", info)
 
         def _run():
             global _runner
