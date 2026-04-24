@@ -138,6 +138,7 @@ class ExperimentRunner:
         self.on_complete    = None   # callback(summary: dict) — session finished
         self.on_cycle_start = None   # callback(window_seconds: float)
         self.on_cycle_end   = None   # callback()
+        self.on_reinforcement = None # callback(info: dict) — chime was triggered
 
         self._pause_event = threading.Event()
         self._pause_event.set()  # starts in "not paused" (set = go)
@@ -301,6 +302,13 @@ class ExperimentRunner:
                     reinforce = (result["list"] == 99 and not result["repeat"])
                     if reinforce:
                         play_reinforcement(self.reward_path)
+                        if self.on_reinforcement:
+                            self.on_reinforcement({
+                                "phase": "practice",
+                                "cycle": cycle,
+                                "word": result["word"],
+                                "matched_list": result["list"],
+                            })
                     tag = "[REINFORCED]" if reinforce else f"[{result.get('list', 'novel')}]"
                     print(f"  [Practice] Cycle {cycle:02d} | '{word}' {tag}")
 
@@ -397,6 +405,13 @@ class ExperimentRunner:
 
                     if reinforced:
                         play_reinforcement(self.reward_path)
+                        if self.on_reinforcement:
+                            self.on_reinforcement({
+                                "phase": self.phase_number,
+                                "cycle": self.cycle,
+                                "word": match_result["word"],
+                                "matched_list": match_result["list"],
+                            })
 
                     self.logger.log_trial(
                         phase=self.phase_number,

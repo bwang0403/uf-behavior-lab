@@ -260,6 +260,7 @@
           <div class="metric"><span>Cycle</span><strong id="v-cycle">--</strong></div>
           <div class="metric"><span>Last response</span><strong id="v-resp">--</strong></div>
           <div class="metric"><span>List remaining</span><strong id="v-rem">--</strong></div>
+          <div class="metric"><span>Last chime</span><strong id="v-chime">--</strong></div>
         </div>
       </section>
 
@@ -271,6 +272,10 @@
         <button id="btn-start" onclick="startSession()" disabled>
           <strong>Start session</strong>
           <span>Begins instructions, practice, and the first phase.</span>
+        </button>
+        <button id="btn-test" onclick="post('test_chime')">
+          <strong>Test chime</strong>
+          <span>Plays the reward sound through the current output device.</span>
         </button>
         <div class="btn-row">
           <button id="btn-pause" onclick="post('pause')" disabled>
@@ -353,6 +358,14 @@ function handleEvent(event, data) {
       break;
     case 'iti_change':
       if (data.active) setStatus('Inter-trial pause', 'Short pause before the next countdown.', 'busy');
+      break;
+    case 'reinforcement':
+      $('v-chime').textContent = data.test ? 'test' : `${data.word || '--'}`;
+      if (data.test) {
+        setStatus('Test chime played', 'If you did not hear it, check Windows volume and output device.', 'info');
+      } else {
+        setStatus('Chime triggered', `Reinforcement was triggered for "${data.word}" in ${data.phase}.`, 'good');
+      }
       break;
     case 'session_stopped':
       setRunning(false);

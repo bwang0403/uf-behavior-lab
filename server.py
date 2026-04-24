@@ -93,6 +93,7 @@ def cmd(action):
         _runner.on_complete    = lambda s:      _push("session_complete", {"summary": s})
         _runner.on_cycle_start = lambda secs:   _push("cycle_start", {"window_seconds": secs})
         _runner.on_cycle_end   = lambda:        _push("cycle_end")
+        _runner.on_reinforcement = lambda info: _push("reinforcement", info)
 
         def _run():
             global _runner
@@ -136,6 +137,17 @@ def cmd(action):
         if _runner:
             _runner.acknowledge_instruction()
         _push("instruction_done")
+        return jsonify({"ok": True})
+
+    elif action == "test_chime":
+        with open(BASE_DIR / "config.yaml", "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        from audio import play_reinforcement, generate_reward_wav
+        reward_path = BASE_DIR / cfg["audio"]["reinforcement_sound"]
+        if not reward_path.exists():
+            generate_reward_wav(str(reward_path))
+        play_reinforcement(str(reward_path))
+        _push("reinforcement", {"test": True, "word": "test chime"})
         return jsonify({"ok": True})
 
     return jsonify({"error": "Unknown action"}), 400
