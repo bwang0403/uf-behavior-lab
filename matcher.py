@@ -124,6 +124,11 @@ class ListManager:
         """Remove all variants of a matched word from available words."""
         self.available[list_num] -= variants
 
+    def reset_list(self, list_num: int):
+        """Restore one list's available words from the original full list."""
+        if list_num in self.full_lists:
+            self.available[list_num] = set(self.full_lists[list_num])
+
     def is_exhausted(self, list_num: int) -> bool:
         """True if all words on a list have been said."""
         return len(self.available.get(list_num, set())) == 0

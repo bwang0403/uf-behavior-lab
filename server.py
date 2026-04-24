@@ -58,6 +58,7 @@ def get_config():
         "participant_id": cfg["experiment"]["participant_id"],
         "group":          cfg["experiment"]["group"],
         "window_seconds": cfg["trial"]["window_seconds"],
+        "practice_enabled": cfg.get("practice", {}).get("enabled", False),
         "model_ready":    _model_ready,
     })
 
@@ -81,8 +82,15 @@ def cmd(action):
         if _runner is not None and _runner.running:
             return jsonify({"error": "Session already running."}), 409
 
+        payload = request.get_json(silent=True) or {}
+        practice_enabled = payload.get("practice_enabled")
+
         from trial_loop import ExperimentRunner
-        _runner = ExperimentRunner("config.yaml", model=_model)
+        _runner = ExperimentRunner(
+            "config.yaml",
+            model=_model,
+            practice_enabled=practice_enabled,
+        )
 
         _runner.on_status = lambda phase, cycle, last_response, remaining: _push("status_update", {
             "phase": phase, "cycle": cycle, "last_response": last_response, "remaining": remaining,
@@ -132,6 +140,16 @@ def cmd(action):
     elif action == "next_phase":
         if _runner:
             _runner.force_next_phase()
+        return jsonify({"ok": True})
+
+    elif action == "restart_practice":
+        if _runner:
+            _runner.restart_practice()
+        return jsonify({"ok": True})
+
+    elif action == "restart_phase":
+        if _runner:
+            _runner.restart_current_phase()
         return jsonify({"ok": True})
 
     elif action == "acknowledge":

@@ -199,6 +199,38 @@
     animation: breathe 1.25s ease-in-out infinite;
   }
 
+  #btn-restart-practice,
+  #btn-restart-phase {
+    background: #6f4b1d;
+  }
+
+  .option-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    padding: 14px 16px;
+    border-radius: 20px;
+    background: #efe3cc;
+    color: #26372f;
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .option-card input {
+    width: 22px;
+    height: 22px;
+    accent-color: var(--green);
+  }
+
+  .option-card span {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
   @keyframes breathe {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.015); }
@@ -279,6 +311,13 @@
 
     <aside>
       <section class="panel controls">
+        <label class="option-card">
+          <input id="opt-practice" type="checkbox" checked>
+          <div>
+            Run practice first
+            <span>If unchecked, Start session goes directly to Phase 1.</span>
+          </div>
+        </label>
         <button id="btn-start" onclick="startSession()" disabled>
           <strong>Start session</strong>
           <span>Begins instructions, practice, and the first phase.</span>
@@ -301,6 +340,16 @@
           <strong>Next phase</strong>
           <span>Manual override. Use for testing or approved pilot cases only.</span>
         </button>
+        <div class="btn-row">
+          <button id="btn-restart-practice" onclick="restartPractice()" disabled>
+            <strong>Restart practice</strong>
+            <span>Fresh practice list. No formal data is affected.</span>
+          </button>
+          <button id="btn-restart-phase" onclick="restartPhase()" disabled>
+            <strong>Restart phase</strong>
+            <span>Marks current attempt discarded and starts a new attempt.</span>
+          </button>
+        </div>
         <button id="btn-continue" onclick="acknowledge()">
           <strong>Continue</strong>
           <span>Click only after the participant has read the instruction screen.</span>
@@ -423,9 +472,14 @@ function handleEvent(event, data) {
   }
 }
 
-async function post(action) {
+async function post(action, payload = null) {
   try {
-    const r = await fetch('/cmd/' + action, { method: 'POST' });
+    const opts = { method: 'POST' };
+    if (payload) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(payload);
+    }
+    const r = await fetch('/cmd/' + action, opts);
     if (!r.ok) {
       const d = await r.json();
       setStatus('Command failed', d.error || String(r.status), 'error');
@@ -438,7 +492,17 @@ async function post(action) {
 function startSession() {
   setBtn('btn-start', false);
   setStatus('Starting session', 'Waiting for the runner thread to begin.', 'busy');
-  post('start');
+  post('start', { practice_enabled: $('opt-practice').checked });
+}
+
+function restartPractice() {
+  post('restart_practice');
+}
+
+function restartPhase() {
+  const phase = $('v-phase').textContent || 'current phase';
+  if (!confirm(`Restart ${phase}? Existing rows from this attempt will be marked discarded, not deleted.`)) return;
+  post('restart_phase');
 }
 
 function acknowledge() {
@@ -455,21 +519,33 @@ function setRunning(on) {
   setBtn('btn-stop', on);
   setBtn('btn-pause', on);
   setBtn('btn-next', on);
+  $('opt-practice').disabled = on;
+  if (!on) {
+    setBtn('btn-restart-practice', false);
+    setBtn('btn-restart-phase', false);
+  }
 }
 
 function updatePhaseContext(data) {
   const name = data.name || (data.phase === 'practice' ? 'Practice Round' : `Phase ${data.phase}`);
-  $('v-phase').textContent = name;
+  const attempt = data.phase_attempt && data.phase_attempt > 1 ? ` (attempt ${data.phase_attempt})` : '';
+  $('v-phase').textContent = name + attempt;
   $('v-target').textContent = data.target || '--';
   if (data.mode === 'practice') {
+    setBtn('btn-restart-practice', true);
+    setBtn('btn-restart-phase', false);
     $('btn-next').querySelector('strong').textContent = 'Skip practice';
     $('btn-next').querySelector('span').textContent = 'Ends practice and moves to Phase 1. Does not skip Phase 1.';
     setStatus('Practice round', 'Practice words can earn the chime. Formal data is not logged during practice.', 'info');
   } else if (data.reinforced_list === null) {
+    setBtn('btn-restart-practice', false);
+    setBtn('btn-restart-phase', true);
     $('btn-next').querySelector('strong').textContent = 'Next phase';
     $('btn-next').querySelector('span').textContent = 'Manual override. Use for testing or approved pilot cases only.';
     setStatus(name, 'Extinction phase: responses are recorded, but no words earn the chime.', 'busy');
   } else {
+    setBtn('btn-restart-practice', false);
+    setBtn('btn-restart-phase', true);
     $('btn-next').querySelector('strong').textContent = 'Next phase';
     $('btn-next').querySelector('span').textContent = 'Manual override. Use for testing or approved pilot cases only.';
     setStatus(name, `Current rule: ${data.target}.`, 'info');
@@ -491,6 +567,7 @@ function renderSummary(summary) {
 fetch('/config').then(r => r.json()).then(cfg => {
   $('v-pid').textContent = cfg.participant_id;
   $('v-grp').textContent = cfg.group + '-list';
+  $('opt-practice').checked = Boolean(cfg.practice_enabled);
   if (cfg.model_ready) {
     setBtn('btn-start', true);
     setStatus('Model ready', 'Click Start session when both screens are prepared.', 'good');

@@ -147,13 +147,18 @@ def check_phase_switch(
 
 class ExperimentRunner:
 
-    def __init__(self, config_path: str = "config.yaml", model=None):
+    def __init__(self, config_path: str = "config.yaml", model=None, practice_enabled: bool | None = None):
         self.cfg = load_config(config_path)
+        if practice_enabled is not None:
+            self.cfg.setdefault("practice", {})["enabled"] = bool(practice_enabled)
         self.running = False
         self.current_phase_idx = 0
         self._last_printed_phase = -1
         self.cycle = 0
         self.no_response_streak = 0
+        self.phase_attempts = {
+            idx + 1: 1 for idx in range(len(self.cfg.get("phases", [])))
+        }
 
         self.on_status      = None
         self.on_iti         = None   # callback(active: bool) — True=ITI started, False=ended
@@ -169,6 +174,8 @@ class ExperimentRunner:
         self._pause_event.set()  # starts in "not paused" (set = go)
         self._force_phase_switch = False
         self._skip_practice = False
+        self._restart_practice = False
+        self._restart_phase = False
         self.in_practice = False
         self.in_formal_phase = False
 
@@ -217,6 +224,10 @@ class ExperimentRunner:
     @property
     def phase_number(self) -> int:
         return self.current_phase_idx + 1
+
+    @property
+    def current_phase_attempt(self) -> int:
+        return self.phase_attempts.get(self.phase_number, 1)
 
     def stop(self):
         self.running = False
@@ -275,6 +286,7 @@ class ExperimentRunner:
         return {
             "mode": "experiment",
             "phase": self.phase_number,
+            "phase_attempt": self.current_phase_attempt,
             "name": phase.get("name", f"Phase {self.phase_number}"),
             "reinforced_list": reinforced_list,
             "target": target,
@@ -303,6 +315,38 @@ class ExperimentRunner:
             self._instruction_event.set()
         elif self.in_formal_phase:
             self._force_phase_switch = True
+
+    def restart_practice(self):
+        """Restart the practice round from a fresh practice list."""
+        if self.in_practice:
+            self._restart_practice = True
+            self._instruction_event.set()
+
+    def restart_current_phase(self):
+        """
+        Discard the current formal phase attempt and restart that phase.
+        Existing rows stay in the database with discarded=1.
+        """
+        if self.in_practice:
+            self.restart_practice()
+        elif self.in_formal_phase:
+            self._restart_phase = True
+            self._instruction_event.set()
+
+    def _apply_phase_restart(self, reason: str = "Manual restart by experimenter"):
+        phase_num = self.phase_number
+        attempt = self.current_phase_attempt
+        self.logger.mark_phase_attempt_discarded(phase=phase_num, phase_attempt=attempt)
+        self.phase_attempts[phase_num] = attempt + 1
+        self.no_response_streak = 0
+        self._force_phase_switch = False
+
+        reinforced_list = self.current_phase.get("reinforced_list")
+        if reinforced_list:
+            self.list_manager.reset_list(reinforced_list)
+
+        print(f"\n  -> Restart {self.current_phase['name']}: {reason}; attempt {attempt + 1}")
+        self._notify_phase_change(self._phase_context(self.current_phase))
 
     def _run_practice(self):
         """
@@ -333,73 +377,84 @@ class ExperimentRunner:
                 self.in_practice = False
                 return
 
-        # Load practice words into a temporary ListManager
-        practice_manager = ListManager({99: list_path})  # list 99 = practice
+        practice_attempt = 0
+        while self.running and not self._skip_practice:
+            practice_attempt += 1
+            self._restart_practice = False
 
-        print("\n--- Practice Round ---")
-        self._notify_phase_change({
-            "mode": "practice",
-            "phase": "practice",
-            "name": "Practice Round",
-            "reinforced_list": "practice",
-            "target": "Practice list earns chime",
-        })
-        streak = 0
-        cycle  = 0
+            # Load practice words into a temporary ListManager.
+            practice_manager = ListManager({99: list_path})  # list 99 = practice
 
-        while (self.running
-               and not self._skip_practice
-               and streak < streak_limit
-               and not practice_manager.is_exhausted(99)):
-            self._wait_if_paused()
-            if not self.running:
-                break
+            print(f"\n--- Practice Round attempt {practice_attempt} ---")
+            self._notify_phase_change({
+                "mode": "practice",
+                "phase": "practice",
+                "phase_attempt": practice_attempt,
+                "name": "Practice Round",
+                "reinforced_list": "practice",
+                "target": "Practice list earns chime",
+            })
+            streak = 0
+            cycle  = 0
 
-            cycle += 1
-            wav_path, response_time = self._record_response()
+            while (self.running
+                   and not self._skip_practice
+                   and not self._restart_practice
+                   and streak < streak_limit
+                   and not practice_manager.is_exhausted(99)):
+                self._wait_if_paused()
+                if not self.running:
+                    break
 
-            if wav_path is None:
-                streak += 1
-                print(f"  [Practice] Cycle {cycle:02d} | No response (streak: {streak})")
-            else:
-                word, transcript = transcribe(
-                    self.model,
-                    wav_path,
-                    self.cfg["asr"]["language"],
-                    vocabulary=practice_manager.vocabulary([99]),
-                )
-                cleanup_audio_file(wav_path)
+                cycle += 1
+                wav_path, response_time = self._record_response()
 
-                if not word:
+                if wav_path is None:
                     streak += 1
-                    print(f"  [Practice] Cycle {cycle:02d} | Unintelligible (streak: {streak})")
+                    print(f"  [Practice] Cycle {cycle:02d} | No response (streak: {streak})")
                 else:
-                    streak = 0
-                    result = practice_manager.match(word, raw_response=transcript)
-                    reinforce = (result["list"] == 99 and not result["repeat"])
-                    if reinforce:
-                        play_reinforcement(self.reward_path)
-                        if self.on_reinforcement:
-                            self.on_reinforcement({
-                                "phase": "practice",
-                                "cycle": cycle,
-                                "word": result["word"],
-                                "matched_list": result["list"],
-                            })
-                    tag = "[REINFORCED]" if reinforce else f"[{result.get('list', 'novel')}]"
-                    print(f"  [Practice] Cycle {cycle:02d} | '{word}' {tag}")
+                    word, transcript = transcribe(
+                        self.model,
+                        wav_path,
+                        self.cfg["asr"]["language"],
+                        vocabulary=practice_manager.vocabulary([99]),
+                    )
+                    cleanup_audio_file(wav_path)
 
-            iti = trial_cfg.get("iti_seconds", 0)
-            if iti > 0 and self.running:
-                if self.on_iti:
-                    self.on_iti(True)
-                time.sleep(iti)
-                if self.on_iti:
-                    self.on_iti(False)
+                    if not word:
+                        streak += 1
+                        print(f"  [Practice] Cycle {cycle:02d} | Unintelligible (streak: {streak})")
+                    else:
+                        streak = 0
+                        result = practice_manager.match(word, raw_response=transcript)
+                        reinforce = (result["list"] == 99 and not result["repeat"])
+                        if reinforce:
+                            play_reinforcement(self.reward_path)
+                            if self.on_reinforcement:
+                                self.on_reinforcement({
+                                    "phase": "practice",
+                                    "cycle": cycle,
+                                    "word": result["word"],
+                                    "matched_list": result["list"],
+                                })
+                        tag = "[REINFORCED]" if reinforce else f"[{result.get('list', 'novel')}]"
+                        print(f"  [Practice] Cycle {cycle:02d} | '{word}' {tag}")
+
+                iti = trial_cfg.get("iti_seconds", 0)
+                if iti > 0 and self.running:
+                    if self.on_iti:
+                        self.on_iti(True)
+                    time.sleep(iti)
+                    if self.on_iti:
+                        self.on_iti(False)
+
+            if not self._restart_practice:
+                break
 
         print("--- Practice complete ---\n")
         self.in_practice = False
         self._skip_practice = False
+        self._restart_practice = False
 
     def run(self):
         """Start the experiment. Blocks until all phases complete or stop() is called."""
@@ -449,6 +504,7 @@ class ExperimentRunner:
                 self.no_response_streak += 1
                 self.logger.log_no_response(
                     phase=self.phase_number,
+                    phase_attempt=self.current_phase_attempt,
                     cycle=self.cycle,
                     timestamp=cycle_start,
                 )
@@ -481,6 +537,7 @@ class ExperimentRunner:
                         },
                         reinforced=False,
                         response_time=response_time,
+                        phase_attempt=self.current_phase_attempt,
                     )
                     print(f"  Cycle {self.cycle:03d} | Unintelligible audio (streak: {self.no_response_streak})")
                     self._update_status(response="?")
@@ -506,6 +563,7 @@ class ExperimentRunner:
                         match_result=match_result,
                         reinforced=reinforced,
                         response_time=response_time,
+                        phase_attempt=self.current_phase_attempt,
                     )
 
                     tag = ""
@@ -530,6 +588,11 @@ class ExperimentRunner:
                 time.sleep(iti)
                 if self.on_iti:
                     self.on_iti(False)
+
+            if self._restart_phase:
+                self._restart_phase = False
+                self._apply_phase_restart()
+                continue
 
             # ── Check Phase Switch ────────────────────────────────────────────
             if self._force_phase_switch:

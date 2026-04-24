@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS trials (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id      TEXT,
     phase           INTEGER,   -- 1, 2, or 3
+    phase_attempt   INTEGER DEFAULT 1,
     cycle           INTEGER,   -- cycle number within session (1-indexed)
     timestamp       REAL,      -- Unix time when cycle started
     response_raw    TEXT,      -- exactly what Whisper heard (or NULL if no response)
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS trials (
     is_repeat       INTEGER,   -- 1 = word already used this session
     reinforced      INTEGER,   -- 1 = pleasant sound played
     response_time   REAL,      -- seconds from cycle start to response (or NULL)
+    discarded       INTEGER DEFAULT 0,
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 """
@@ -69,6 +71,14 @@ class SessionLogger:
         with self._connect() as conn:
             conn.execute(CREATE_SESSIONS)
             conn.execute(CREATE_TRIALS)
+            self._migrate_trials(conn)
+
+    def _migrate_trials(self, conn):
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(trials)").fetchall()}
+        if "phase_attempt" not in cols:
+            conn.execute("ALTER TABLE trials ADD COLUMN phase_attempt INTEGER DEFAULT 1")
+        if "discarded" not in cols:
+            conn.execute("ALTER TABLE trials ADD COLUMN discarded INTEGER DEFAULT 0")
 
     def _create_session(self):
         with self._connect() as conn:
@@ -85,18 +95,21 @@ class SessionLogger:
         match_result: dict,     # output from matcher.match()
         reinforced: bool,
         response_time: float | None,
+        phase_attempt: int = 1,
+        discarded: bool = False,
     ):
         """Log one completed cycle."""
         with self._connect() as conn:
             conn.execute(
                 """INSERT INTO trials
-                   (session_id, phase, cycle, timestamp,
+                   (session_id, phase, phase_attempt, cycle, timestamp,
                     response_raw, response_word, matched_list,
-                    is_novel, is_repeat, reinforced, response_time)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    is_novel, is_repeat, reinforced, response_time, discarded)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     self.session_id,
                     phase,
+                    phase_attempt,
                     cycle,
                     timestamp,
                     match_result.get("raw"),
@@ -106,10 +119,11 @@ class SessionLogger:
                     int(match_result.get("repeat", False)),
                     int(reinforced),
                     response_time,
+                    int(discarded),
                 )
             )
 
-    def log_no_response(self, phase: int, cycle: int, timestamp: float):
+    def log_no_response(self, phase: int, cycle: int, timestamp: float, phase_attempt: int = 1):
         """Log a cycle where participant said nothing."""
         self.log_trial(
             phase=phase,
@@ -118,7 +132,16 @@ class SessionLogger:
             match_result={"raw": None, "word": None, "list": None, "novel": False, "repeat": False},
             reinforced=False,
             response_time=None,
+            phase_attempt=phase_attempt,
         )
+
+    def mark_phase_attempt_discarded(self, phase: int, phase_attempt: int):
+        """Mark all trials from one phase attempt as excluded from analysis."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE trials SET discarded=1 WHERE session_id=? AND phase=? AND phase_attempt=?",
+                (self.session_id, phase, phase_attempt),
+            )
 
     def close(self, export_csv: bool = True) -> str | None:
         """Mark session as ended and optionally export CSV. Returns CSV path."""
@@ -149,7 +172,7 @@ class SessionLogger:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT phase, response_word, matched_list, is_repeat "
-                "FROM trials WHERE session_id=? ORDER BY cycle",
+                "FROM trials WHERE session_id=? AND discarded=0 ORDER BY cycle",
                 (self.session_id,)
             ).fetchall()
 
@@ -184,14 +207,12 @@ class SessionLogger:
     def _export_csv(self) -> str:
         csv_path = str(Path(self.db_path).parent / f"{self.session_id}.csv")
         with self._connect() as conn:
-            rows = conn.execute(
+            cursor = conn.execute(
                 "SELECT * FROM trials WHERE session_id=? ORDER BY cycle",
                 (self.session_id,)
-            ).fetchall()
-            cols = [d[0] for d in conn.execute(
-                "SELECT * FROM trials WHERE session_id=? LIMIT 1",
-                (self.session_id,)
-            ).description]
+            )
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
 
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
