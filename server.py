@@ -84,8 +84,8 @@ def cmd(action):
         from trial_loop import ExperimentRunner
         _runner = ExperimentRunner("config.yaml", model=_model)
 
-        _runner.on_status = lambda ph, cy, resp, rem: _push("status_update", {
-            "phase": ph, "cycle": cy, "last_response": resp, "remaining": rem,
+        _runner.on_status = lambda phase, cycle, last_response, remaining: _push("status_update", {
+            "phase": phase, "cycle": cycle, "last_response": last_response, "remaining": remaining,
         })
         _runner.on_iti         = lambda active: _push("iti_change",   {"active": active})
         _runner.on_pause       = lambda paused: _push("pause_change", {"paused": paused})
