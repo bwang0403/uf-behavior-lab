@@ -1,4 +1,5 @@
 faster-whisper
+openai
 sounddevice
 soundfile
 numpy

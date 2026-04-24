@@ -13,6 +13,7 @@ from pathlib import Path
 import threading
 import traceback
 import yaml
+import os
 
 BASE_DIR = Path(__file__).parent
 app = Flask(__name__, static_folder=str(BASE_DIR / "frontend" / "static"))
@@ -59,6 +60,7 @@ def get_config():
         "group":          cfg["experiment"]["group"],
         "window_seconds": cfg["trial"]["window_seconds"],
         "practice_enabled": cfg.get("practice", {}).get("enabled", False),
+        "asr_provider":   cfg.get("asr", {}).get("provider", "local"),
         "model_ready":    _model_ready,
     })
 
@@ -78,7 +80,7 @@ def cmd(action):
 
     if action == "start":
         if not _model_ready:
-            return jsonify({"error": "Whisper model not ready — please wait."}), 503
+            return jsonify({"error": "ASR is not ready — check the terminal/configuration."}), 503
         if _runner is not None and _runner.running:
             return jsonify({"error": "Session already running."}), 409
 
@@ -179,11 +181,43 @@ def _preload_model():
     try:
         with open(BASE_DIR / "config.yaml", "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
+        asr_cfg = cfg.get("asr", {})
+        provider = str(asr_cfg.get("provider", "local")).lower()
+
+        if provider in {"openai", "api", "cloud"}:
+            if not os.environ.get("OPENAI_API_KEY"):
+                _model_ready = False
+                msg = "OPENAI_API_KEY is not set; hosted ASR is not ready."
+                print(f"  {msg}")
+                _push("model_status", {"ready": False, "provider": provider, "message": msg})
+                return
+            try:
+                import openai  # noqa: F401
+            except ImportError:
+                _model_ready = False
+                msg = "The openai package is not installed; run pip install -r requirements.txt."
+                print(f"  {msg}")
+                _push("model_status", {"ready": False, "provider": provider, "message": msg})
+                return
+            _model = None
+            _model_ready = True
+            print(f"  Hosted ASR ready ({provider}).")
+            _push("model_status", {
+                "ready": True,
+                "provider": provider,
+                "message": "Hosted ASR ready.",
+            })
+            return
+
         from faster_whisper import WhisperModel
-        _model = WhisperModel(cfg["asr"]["model_size"], device="cpu")
+        _model = WhisperModel(asr_cfg["model_size"], device="cpu")
         _model_ready = True
-        print("  Whisper model ready.")
-        _push("model_status", {"ready": True})
+        print("  Local Whisper model ready.")
+        _push("model_status", {
+            "ready": True,
+            "provider": provider,
+            "message": "Local Whisper model ready.",
+        })
     except Exception:
         traceback.print_exc()
 

@@ -42,7 +42,11 @@ audio:
 
 # ─── ASR ──────────────────────────────────────────────────────────────────────
 asr:
+  provider: "local"          # local = faster-whisper; openai = hosted API via OPENAI_API_KEY
   model_size: "base"          # base = fast on CPU; try "small" if accuracy is poor
+  beam_size: 5                # higher beam search improves local accuracy at some speed cost
+  openai_model: "gpt-4o-transcribe"
+  prefer_vocabulary_matches: true
   language: "en"
 
 # ─── Practice Round ───────────────────────────────────────────────────────────

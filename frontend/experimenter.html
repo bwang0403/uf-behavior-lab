@@ -292,8 +292,8 @@
   <section class="grid">
     <div>
       <section class="panel status-panel">
-        <h2 id="state-title">Loading model.</h2>
-        <p id="state-detail">Wait until the system says the model is ready before starting.</p>
+        <h2 id="state-title">Preparing ASR.</h2>
+        <p id="state-detail">Wait until speech recognition is ready before starting.</p>
         <div class="metrics">
           <div class="metric"><span>Participant</span><strong id="v-pid">--</strong></div>
           <div class="metric"><span>Group</span><strong id="v-grp">--</strong></div>
@@ -400,9 +400,9 @@ function handleEvent(event, data) {
     case 'model_status':
       if (data.ready) {
         setBtn('btn-start', true);
-        setStatus('Model ready', 'Click Start session when both screens are prepared.', 'good');
+        setStatus('ASR ready', data.message || 'Click Start session when both screens are prepared.', 'good');
       } else {
-        setStatus('Loading model', 'Wait for Whisper to finish loading.', 'busy');
+        setStatus('ASR not ready', data.message || 'Check the terminal or ASR configuration.', 'busy');
       }
       break;
     case 'session_started':
@@ -570,9 +570,9 @@ fetch('/config').then(r => r.json()).then(cfg => {
   $('opt-practice').checked = Boolean(cfg.practice_enabled);
   if (cfg.model_ready) {
     setBtn('btn-start', true);
-    setStatus('Model ready', 'Click Start session when both screens are prepared.', 'good');
+    setStatus('ASR ready', 'Click Start session when both screens are prepared.', 'good');
   } else {
-    setStatus('Loading model', 'Wait for Whisper to finish loading.', 'busy');
+    setStatus('Preparing ASR', 'Wait for speech recognition to become ready.', 'busy');
   }
 });
 

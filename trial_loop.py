@@ -3,7 +3,7 @@ trial_loop.py
 Core experiment loop. Orchestrates each cycle:
   1. Wait for window to open
   2. Record microphone until speech ends or window expires
-  3. Transcribe with Whisper
+  3. Transcribe with ASR
   4. Match response against current phase's lists
   5. Play reinforcement if criteria met
   6. Log result
@@ -15,7 +15,11 @@ import threading
 import yaml
 import os
 from pathlib import Path
-from faster_whisper import WhisperModel
+
+try:
+    from faster_whisper import WhisperModel
+except ImportError:  # Optional when using a hosted ASR provider.
+    WhisperModel = None
 
 from matcher import ListManager
 from logger import SessionLogger
@@ -52,30 +56,68 @@ def _build_asr_prompt(vocabulary: list[str] | None) -> str | None:
         return None
     words = ", ".join(vocabulary)
     return (
-        "The speaker says one clear English word from this experiment. "
-        f"Possible words include: {words}."
+        "The speaker says one clear English word in a behavioral experiment. "
+        "Transcribe the spoken word exactly. "
+        f"The closed-set vocabulary is: {words}."
     )
 
 
-def transcribe(
-    model: WhisperModel,
+def _clean_words(text: str) -> list[str]:
+    clean_text = re.sub(r"[^a-zA-Z\s]", " ", text or "")
+    return [w.lower() for w in clean_text.split()]
+
+
+def _extract_response_word(
+    transcript: str,
+    vocabulary: list[str] | None = None,
+    prefer_vocabulary_matches: bool = True,
+) -> str:
+    words = [w for w in _clean_words(transcript) if w not in _FILLERS]
+    if not words:
+        return ""
+
+    if prefer_vocabulary_matches and vocabulary:
+        vocab = {re.sub(r"[^a-zA-Z]", "", word).lower(): word.lower() for word in vocabulary}
+
+        # Prefer exact vocabulary words anywhere in the transcript.
+        for word in words:
+            if word in vocab:
+                return vocab[word]
+
+        # Whisper often splits compound words, e.g. "fire fighter" -> "firefighter".
+        for span in (2, 3):
+            for i in range(0, len(words) - span + 1):
+                joined = "".join(words[i:i + span])
+                if joined in vocab:
+                    return vocab[joined]
+
+        joined_all = "".join(words)
+        if joined_all in vocab:
+            return vocab[joined_all]
+
+    return words[0]
+
+
+def _transcribe_local(
+    model,
     wav_path: str,
     language: str = "en",
     vocabulary: list[str] | None = None,
-) -> tuple[str, str]:
-    """
-    Run Whisper on a wav file.
-    Return:
-    - the first non-filler word spoken
-    - the full transcript text for logging / later review
+    asr_cfg: dict | None = None,
+) -> str:
+    """Run local faster-whisper on a wav file and return the full transcript."""
+    if model is None:
+        raise RuntimeError(
+            "Local ASR selected, but faster-whisper is not available. "
+            "Install faster-whisper or set asr.provider to 'openai'."
+        )
 
-    Uses Regex to replace non-alphabet characters with spaces, preventing 
-    Whisper from merging words (e.g., "um...apple" -> "um apple").
-    """
+    asr_cfg = asr_cfg or {}
     prompt = _build_asr_prompt(vocabulary)
     transcribe_kwargs = {
         "language": language,
         "condition_on_previous_text": False,
+        "beam_size": int(asr_cfg.get("beam_size", 5)),
     }
     if prompt:
         transcribe_kwargs["initial_prompt"] = prompt
@@ -84,25 +126,83 @@ def transcribe(
     segments, _ = model.transcribe(wav_path, **transcribe_kwargs)
 
     transcript_parts = []
-    words = []
     for seg in segments:
         seg_text = (seg.text or "").strip()
         if seg_text:
             transcript_parts.append(seg_text)
 
-        # 1. Replace all punctuation and special characters with spaces
-        clean_text = re.sub(r'[^a-zA-Z\s]', ' ', seg.text or "")
+    return " ".join(transcript_parts).strip()
 
-        # 2. Split the cleaned text into individual words
-        words.extend(clean_text.split())
 
-    transcript = " ".join(transcript_parts).strip()
-    for w in words:
-        w_lower = w.lower()
-        if w_lower and w_lower not in _FILLERS:
-            return w_lower, transcript
+def _transcribe_openai(
+    wav_path: str,
+    language: str = "en",
+    vocabulary: list[str] | None = None,
+    asr_cfg: dict | None = None,
+) -> str:
+    """
+    Run hosted OpenAI transcription.
+    Requires OPENAI_API_KEY and the optional openai package.
+    """
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError(
+            "OpenAI ASR selected, but the openai package is not installed. "
+            "Run: pip install openai"
+        ) from exc
 
-    return "", transcript
+    asr_cfg = asr_cfg or {}
+    model_name = asr_cfg.get("openai_model", "gpt-4o-transcribe")
+    prompt = _build_asr_prompt(vocabulary)
+
+    client = OpenAI()
+    with open(wav_path, "rb") as audio_file:
+        request = {
+            "model": model_name,
+            "file": audio_file,
+            "response_format": "text",
+        }
+        if prompt:
+            request["prompt"] = prompt
+        if language:
+            request["language"] = language
+
+        result = client.audio.transcriptions.create(**request)
+
+    if isinstance(result, str):
+        return result.strip()
+    return getattr(result, "text", str(result)).strip()
+
+
+def transcribe(
+    model,
+    wav_path: str,
+    language: str = "en",
+    vocabulary: list[str] | None = None,
+    asr_cfg: dict | None = None,
+) -> tuple[str, str]:
+    """
+    Transcribe a wav file and return:
+    - the selected response word
+    - the full transcript text for logging / later review
+    """
+    asr_cfg = asr_cfg or {}
+    provider = str(asr_cfg.get("provider", "local")).lower()
+
+    if provider in {"local", "whisper", "faster-whisper"}:
+        transcript = _transcribe_local(model, wav_path, language, vocabulary, asr_cfg)
+    elif provider in {"openai", "api", "cloud"}:
+        transcript = _transcribe_openai(wav_path, language, vocabulary, asr_cfg)
+    else:
+        raise RuntimeError(f"Unsupported ASR provider: {provider}")
+
+    word = _extract_response_word(
+        transcript,
+        vocabulary=vocabulary,
+        prefer_vocabulary_matches=bool(asr_cfg.get("prefer_vocabulary_matches", True)),
+    )
+    return word, transcript
 
 
 # ─── Phase Logic ──────────────────────────────────────────────────────────────
@@ -186,10 +286,20 @@ class ExperimentRunner:
         if model is not None:
             self.model = model
         else:
-            asr_cfg = self.cfg["asr"]
-            print(f"Loading Whisper model ({asr_cfg['model_size']})...")
-            self.model = WhisperModel(asr_cfg["model_size"], device="cpu")
-            print("Model ready.")
+            asr_cfg = self.cfg.get("asr", {})
+            provider = str(asr_cfg.get("provider", "local")).lower()
+            if provider in {"local", "whisper", "faster-whisper"}:
+                if WhisperModel is None:
+                    raise RuntimeError(
+                        "Local ASR selected, but faster-whisper is not installed. "
+                        "Install faster-whisper or set asr.provider to 'openai'."
+                    )
+                print(f"Loading Whisper model ({asr_cfg['model_size']})...")
+                self.model = WhisperModel(asr_cfg["model_size"], device="cpu")
+                print("Model ready.")
+            else:
+                self.model = None
+                print(f"Using hosted ASR provider: {provider}")
 
         # Load word lists
         list_cfg = self.cfg["lists"]
@@ -292,10 +402,9 @@ class ExperimentRunner:
             "target": target,
         }
 
-    def _current_vocabulary(self, reinforced_list: int | None = None) -> list[str]:
-        if reinforced_list is None:
-            return self.list_manager.vocabulary()
-        return self.list_manager.vocabulary([reinforced_list])
+    def _experiment_vocabulary(self) -> list[str]:
+        """ASR should hear all experiment words; reinforcement is decided later."""
+        return self.list_manager.vocabulary()
 
     def _notify_phase_change(self, info: dict):
         if self.on_phase_change:
@@ -418,6 +527,7 @@ class ExperimentRunner:
                         wav_path,
                         self.cfg["asr"]["language"],
                         vocabulary=practice_manager.vocabulary([99]),
+                        asr_cfg=self.cfg.get("asr", {}),
                     )
                     cleanup_audio_file(wav_path)
 
@@ -517,12 +627,13 @@ class ExperimentRunner:
                     self.model,
                     wav_path,
                     self.cfg["asr"]["language"],
-                    vocabulary=self._current_vocabulary(reinforced_list),
+                    vocabulary=self._experiment_vocabulary(),
+                    asr_cfg=self.cfg.get("asr", {}),
                 )
                 cleanup_audio_file(wav_path)
 
                 if not word:
-                    # Whisper returned empty (noise, breath, etc.)
+                    # ASR returned empty (noise, breath, etc.)
                     self.no_response_streak += 1
                     self.logger.log_trial(
                         phase=self.phase_number,

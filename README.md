@@ -44,7 +44,7 @@ Each cycle proceeds as follows:
 ```
 Window opens (3s default)
     -> Participant speaks a word
-    -> Whisper ASR transcribes it
+    -> ASR transcribes it
     -> Matched against current reinforced list
     -> If correct and not repeated: chime plays (reinforcement)
     -> Log result to database
@@ -97,7 +97,7 @@ This polling architecture was chosen because:
 
 | Event | Data Fields | Triggered When |
 |-------|-------------|----------------|
-| `model_status` | `ready: bool` | Whisper model loaded (or still loading) |
+| `model_status` | `ready: bool` | ASR ready status |
 | `session_started` | — | START SESSION clicked and confirmed |
 | `session_ended` | — | Experiment thread exits (natural or crash) |
 | `session_stopped` | — | STOP button clicked |
@@ -175,20 +175,46 @@ python audio.py
 
 | Package | Purpose |
 |---------|---------|
-| `faster-whisper` | Speech recognition (ASR) |
+| `faster-whisper` | Local speech recognition (ASR) |
+| `openai` | Optional hosted ASR provider |
 | `sounddevice` | Microphone recording and audio playback |
 | `soundfile` | WAV file reading/writing |
 | `numpy` | Audio signal processing |
 | `pyyaml` | Config file parsing |
 | `flask` | Web server |
 
-### Whisper Model Download
+### ASR Provider
 
-The first run will download the Whisper `base` model (~150MB) automatically. It is cached at:
+By default, `config.yaml` uses local `faster-whisper`:
+
+```yaml
+asr:
+  provider: "local"
+  model_size: "base"
+```
+
+The first local run downloads the Whisper `base` model (~150MB) automatically. It is cached at:
 ```
 C:\Users\<username>\.cache\huggingface\
 ```
 After the first download, the model loads from cache (no internet needed).
+
+For more consistent recognition across devices, use hosted ASR instead:
+
+```yaml
+asr:
+  provider: "openai"
+  openai_model: "gpt-4o-transcribe"
+```
+
+Then set `OPENAI_API_KEY` in the environment before starting the app:
+
+```powershell
+$env:OPENAI_API_KEY = "sk-..."
+python main.py
+```
+
+Hosted ASR still uses the same microphone recording flow, but transcription no longer depends on the laptop's local Whisper model or model cache.
 
 ---
 
@@ -218,7 +244,7 @@ Before running real participants, the research team should explicitly finalize t
 - **Timing parameters**
   `trial.window_seconds`, `trial.min_response_gap`, and `trial.iti_seconds`. These determine how long a participant can respond, how much post-speech silence ends a recording, and the gap between cycles.
 - **ASR settings**
-  `asr.model_size` and `asr.language`. The default CPU-friendly setting is `base`, but if recognition accuracy is not acceptable in pilot runs, decide whether to move to `small`.
+  `asr.provider`, `asr.model_size`, `asr.openai_model`, and `asr.language`. The default CPU-friendly local setting is `base`, but if recognition accuracy is not acceptable in pilot runs, decide whether to move to local `small` or hosted `openai`.
 - **Practice-round policy**
   Whether `practice.enabled` stays on, how long practice should run (`practice.no_response_streak`), and what instruction text is shown before practice.
 - **Instruction wording**
@@ -263,7 +289,7 @@ Experimenter panel shows "LOADING WHISPER MODEL..."
 
 | Button | Function |
 |--------|----------|
-| START SESSION | Begin experiment (requires model ready) |
+| START SESSION | Begin experiment (requires ASR ready) |
 | STOP | Immediately end session (data is saved) |
 | PAUSE / RESUME | Freeze experiment mid-session |
 | NEXT PHASE | Manually advance to next phase immediately |
@@ -331,7 +357,11 @@ audio:
 
 # ─── Speech Recognition ───────────────────────────────────────────────────────
 asr:
+  provider: "local"          # local or openai
   model_size: "base"          # base (fast) or small (more accurate, slower)
+  beam_size: 5
+  openai_model: "gpt-4o-transcribe"
+  prefer_vocabulary_matches: true
   language: "en"              # Language code
 
 # ─── Practice Round ───────────────────────────────────────────────────────────
@@ -414,7 +444,7 @@ Located at `data/resurgence.db`. Contains all sessions from all participants.
 | phase | INTEGER | 1, 2, or 3 |
 | cycle | INTEGER | Cycle number within session (1-indexed) |
 | timestamp | REAL | Unix time when cycle started |
-| response_raw | TEXT | Exactly what Whisper heard (NULL if no response) |
+| response_raw | TEXT | Raw ASR transcript (NULL if no response) |
 | response_word | TEXT | Canonical matched word (NULL if no match) |
 | matched_list | INTEGER | Which list it matched (NULL if novel or no response) |
 | is_novel | INTEGER | 1 = word not on any list |
@@ -558,7 +588,13 @@ while self.running and self.current_phase_idx < len(phases):
     wav_path, response_time = record_until_silence(...)
 
     # 2. Transcribe
-    word = transcribe(self.model, wav_path, language)
+    word, transcript = transcribe(
+        self.model,
+        wav_path,
+        language,
+        vocabulary=self._experiment_vocabulary(),
+        asr_cfg=self.cfg.get("asr", {}),
+    )
 
     # 3. Match
     match_result = self.list_manager.match(word)
@@ -642,11 +678,12 @@ This should not happen with the current code. If it does:
 2. Open `http://localhost:5000/poll?since=0` in browser — do you see `cycle_start` events after clicking Start?
 3. If events are present but arc is not animating, check `handleEvent` in `participant.html`
 
-### Whisper keeps transcribing wrong words
+### ASR keeps transcribing wrong words
 
-1. Try `model_size: "small"` in config.yaml (more accurate, slower)
-2. Check for background noise — reduce `silence_threshold` if mic is very sensitive
-3. Add problematic words to `_FILLERS` in `trial_loop.py` to skip them
+1. Use words from the current experiment list; practice words such as `mountain` will not chime during Phase 1.
+2. Try `model_size: "small"` in `config.yaml` for local ASR (more accurate, slower).
+3. For cross-device consistency, set `asr.provider: "openai"` and set `OPENAI_API_KEY`.
+4. Check for background noise and microphone placement.
 
 ### Database locked error
 
