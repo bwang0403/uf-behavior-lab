@@ -2,91 +2,325 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Experiment</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Participant Screen</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #07120f;
+    --panel: #f7efe0;
+    --ink: #10231d;
+    --muted: #6f7b72;
+    --blue: #2d6cdf;
+    --green: #0f9f6e;
+    --amber: #d89018;
+    --red: #c94a32;
+    --ring: 1319;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
   body {
-    background: #0a0a0f; display: flex; align-items: center; justify-content: center;
-    height: 100vh; overflow: hidden; font-family: 'Courier New', monospace; cursor: none;
+    min-height: 100vh;
+    overflow: hidden;
+    cursor: none;
+    color: var(--ink);
+    font-family: "Trebuchet MS", "Gill Sans", sans-serif;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(45, 108, 223, .34), transparent 32%),
+      radial-gradient(circle at 82% 18%, rgba(15, 159, 110, .26), transparent 28%),
+      linear-gradient(135deg, #07120f 0%, #10231d 54%, #1c150d 100%);
+    display: grid;
+    place-items: center;
   }
-  #stage { position: relative; width: 520px; height: 520px; }
-  svg { width: 100%; height: 100%; }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(247, 239, 224, .055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(247, 239, 224, .055) 1px, transparent 1px);
+    background-size: 46px 46px;
+    mask-image: radial-gradient(circle at center, black 0%, transparent 72%);
+    pointer-events: none;
+  }
+
+  .shell {
+    position: relative;
+    width: min(1120px, 92vw);
+    min-height: min(720px, 88vh);
+    display: grid;
+    grid-template-columns: 1fr 500px;
+    gap: 34px;
+    align-items: center;
+    z-index: 1;
+  }
+
+  .prompt-card {
+    background: rgba(247, 239, 224, .96);
+    border: 1px solid rgba(247, 239, 224, .5);
+    border-radius: 34px;
+    padding: clamp(34px, 5vw, 62px);
+    min-height: 470px;
+    box-shadow: 0 28px 90px rgba(0, 0, 0, .38);
+  }
+
+  #mode-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: rgba(16, 35, 29, .08);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+  }
+
+  #mode-label::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  h1 {
+    margin-top: 28px;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(52px, 7vw, 96px);
+    line-height: .92;
+    letter-spacing: -.06em;
+  }
+
+  #sub-prompt {
+    margin-top: 24px;
+    max-width: 580px;
+    color: #425148;
+    font-size: clamp(22px, 2.4vw, 31px);
+    line-height: 1.32;
+  }
+
+  .rule-strip {
+    margin-top: 42px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .rule {
+    min-height: 78px;
+    border-radius: 18px;
+    padding: 16px;
+    background: #eadfc9;
+    color: #314139;
+    font-size: 16px;
+    line-height: 1.25;
+  }
+
+  .rule b {
+    display: block;
+    margin-bottom: 5px;
+    color: #10231d;
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+
+  .timer-card {
+    position: relative;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+  }
+
+  .timer-card svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 22px 35px rgba(0, 0, 0, .28));
+  }
+
+  .ring-bg { stroke: rgba(247, 239, 224, .16); }
+  #arc {
+    stroke: var(--blue);
+    transition: stroke .25s ease, stroke-dashoffset .1s linear;
+  }
+
+  .time-cluster {
+    position: relative;
+    width: 330px;
+    height: 330px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: rgba(247, 239, 224, .94);
+    box-shadow: inset 0 0 0 1px rgba(16, 35, 29, .08);
+  }
+
   #time-display {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -60%);
-    color: #f0f0f8; font-size: 88px; font-weight: bold; letter-spacing: -2px;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 104px;
+    font-weight: 700;
+    letter-spacing: -.08em;
+    transform: translateY(-8px);
   }
+
   #sec-label {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, 34px);
-    color: #5a5a7a; font-size: 13px; letter-spacing: 4px;
+    position: absolute;
+    top: 214px;
+    color: var(--muted);
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: .22em;
+    text-transform: uppercase;
   }
-  #status-text {
-    position: absolute; bottom: -52px; left: 50%; transform: translateX(-50%);
-    color: #5a5a7a; font-size: 13px; letter-spacing: 2px; white-space: nowrap;
+
+  body[data-state="speak"] #mode-label { color: var(--green); background: rgba(15, 159, 110, .12); }
+  body[data-state="speak"] #arc { stroke: var(--green); }
+  body[data-state="speak"] .prompt-card { animation: lift .42s ease both; }
+  body[data-state="wait"] #mode-label,
+  body[data-state="processing"] #mode-label { color: var(--amber); background: rgba(216, 144, 24, .14); }
+  body[data-state="paused"] #mode-label { color: var(--red); background: rgba(201, 74, 50, .14); }
+
+  @keyframes lift {
+    from { transform: translateY(14px); opacity: .9; }
+    to { transform: translateY(0); opacity: 1; }
   }
-  .overlay { display: none; position: fixed; inset: 0; align-items: center; justify-content: center; z-index: 100; }
+
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    align-items: center;
+    justify-content: center;
+    padding: 44px;
+    background:
+      radial-gradient(circle at 50% 30%, rgba(45, 108, 223, .24), transparent 36%),
+      rgba(7, 18, 15, .96);
+  }
+
   .overlay.show { display: flex; }
-  #instruction-overlay { background: #0a0a0f; }
-  #instruction-text { color: #f0f0f8; font-size: 22px; text-align: center; line-height: 1.9; max-width: 680px; white-space: pre-line; }
-  #pause-overlay { background: rgba(10,10,15,.93); z-index: 200; }
-  #pause-text { color: #e0a020; font-size: 48px; font-weight: bold; letter-spacing: 8px; }
+
+  .overlay-card {
+    width: min(820px, 92vw);
+    padding: clamp(34px, 5vw, 62px);
+    border-radius: 34px;
+    background: var(--panel);
+    box-shadow: 0 34px 100px rgba(0, 0, 0, .42);
+    text-align: center;
+  }
+
+  .overlay-card h2 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(42px, 6vw, 78px);
+    letter-spacing: -.05em;
+    line-height: .95;
+  }
+
+  #instruction-text,
+  #pause-text {
+    margin-top: 24px;
+    color: #2f4238;
+    font-size: clamp(24px, 3vw, 34px);
+    line-height: 1.5;
+    white-space: pre-line;
+  }
+
+  @media (max-width: 980px) {
+    .shell {
+      grid-template-columns: 1fr;
+      min-height: auto;
+      padding: 28px 0;
+    }
+    .timer-card {
+      max-width: 460px;
+      margin: 0 auto;
+    }
+    .rule-strip { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
-<body>
-<div id="stage">
-  <svg viewBox="0 0 520 520">
-    <g id="dots"></g>
-    <circle cx="260" cy="260" r="210" fill="none" stroke="#2a2a3a" stroke-width="18"/>
-    <circle id="arc" cx="260" cy="260" r="210" fill="none" stroke="#4f8fff" stroke-width="18"
-            stroke-dasharray="1319" stroke-dashoffset="1319" stroke-linecap="round" transform="rotate(-90 260 260)"/>
-    <circle cx="260" cy="260" r="5" fill="#5a5a7a"/>
-  </svg>
-  <div id="time-display">—</div>
-  <div id="sec-label">SEC</div>
-  <div id="status-text">WAITING TO START</div>
+<body data-state="idle">
+<main class="shell" aria-live="polite">
+  <section class="prompt-card">
+    <div id="mode-label">Waiting</div>
+    <h1 id="main-prompt">Wait for the timer.</h1>
+    <p id="sub-prompt">Speak only when the countdown is visible and the screen says "Speak now."</p>
+    <div class="rule-strip">
+      <div class="rule"><b>When to speak</b>During the 3-second timer.</div>
+      <div class="rule"><b>What to say</b>One clear English word.</div>
+      <div class="rule"><b>When to wait</b>When the screen says please wait.</div>
+    </div>
+  </section>
+
+  <section class="timer-card" aria-label="response timer">
+    <svg viewBox="0 0 520 520" aria-hidden="true">
+      <circle class="ring-bg" cx="260" cy="260" r="210" fill="none" stroke-width="22"/>
+      <circle id="arc" cx="260" cy="260" r="210" fill="none" stroke-width="22"
+              stroke-dasharray="1319" stroke-dashoffset="1319" stroke-linecap="round"
+              transform="rotate(-90 260 260)"/>
+    </svg>
+    <div class="time-cluster">
+      <div id="time-display">--</div>
+      <div id="sec-label">seconds</div>
+    </div>
+  </section>
+</main>
+
+<div id="instruction-overlay" class="overlay">
+  <div class="overlay-card">
+    <h2>Instructions</h2>
+    <div id="instruction-text"></div>
+  </div>
 </div>
-<div id="instruction-overlay" class="overlay"><div id="instruction-text"></div></div>
-<div id="pause-overlay" class="overlay"><div id="pause-text">PAUSED</div></div>
+
+<div id="pause-overlay" class="overlay">
+  <div class="overlay-card">
+    <h2>Paused</h2>
+    <div id="pause-text">Please wait. The experimenter will resume the session.</div>
+  </div>
+</div>
 
 <script>
 const CIRC = 2 * Math.PI * 210;
-const arc          = document.getElementById('arc');
-const timeDisplay  = document.getElementById('time-display');
-const statusText   = document.getElementById('status-text');
+const arc = document.getElementById('arc');
+const timeDisplay = document.getElementById('time-display');
+const modeLabel = document.getElementById('mode-label');
+const mainPrompt = document.getElementById('main-prompt');
+const subPrompt = document.getElementById('sub-prompt');
 const instrOverlay = document.getElementById('instruction-overlay');
-const instrText    = document.getElementById('instruction-text');
+const instrText = document.getElementById('instruction-text');
 const pauseOverlay = document.getElementById('pause-overlay');
 
-let windowSeconds = 3, timeLeft = 0, timerId = null, lastSeq = 0;
+let windowSeconds = 3;
+let timeLeft = 0;
+let timerId = null;
+let lastSeq = 0;
 
-// Dot grid
-(function() {
-  const g = document.getElementById('dots'), cx = 260, cy = 260;
-  for (let x = 0; x <= 520; x += 44)
-    for (let y = 0; y <= 520; y += 44) {
-      const dist = Math.hypot(x-cx, y-cy);
-      if (dist > 580) continue;
-      const v = Math.round(22 * Math.max(0, 1 - dist/580));
-      const d = document.createElementNS('http://www.w3.org/2000/svg','circle');
-      d.setAttribute('cx',x); d.setAttribute('cy',y); d.setAttribute('r',1.5);
-      d.setAttribute('fill',`rgb(${v},${v},${Math.min(255,v+8)})`);
-      g.appendChild(d);
-    }
-})();
-
-function arcColor(ratio) {
-  let r,g,b;
-  if (ratio > .5) { const t=(ratio-.5)/.5; r=Math.round(0x4f*t+0xff*(1-t)); g=Math.round(0x8f*t+0xb8*(1-t)); b=Math.round(0xff*t+0x30*(1-t)); }
-  else            { const t=ratio/.5;      r=0xff;                           g=Math.round(0x5f*(1-t)+0xb8*t); b=Math.round(0x57*(1-t)+0x30*t); }
-  return `rgb(${r},${g},${b})`;
+function setState(state, label, main, sub) {
+  document.body.dataset.state = state;
+  modeLabel.textContent = label;
+  mainPrompt.textContent = main;
+  subPrompt.textContent = sub;
 }
+
 function renderArc(ratio) {
-  arc.setAttribute('stroke-dashoffset', CIRC*(1-ratio));
-  arc.setAttribute('stroke', ratio > 0 ? arcColor(ratio) : '#4f8fff');
+  arc.setAttribute('stroke-dashoffset', CIRC * (1 - ratio));
 }
 
 function startCycle(secs) {
-  windowSeconds = secs; timeLeft = secs; statusText.textContent = '';
+  windowSeconds = secs || 3;
+  timeLeft = windowSeconds;
   clearInterval(timerId);
+  setState('speak', 'Speak now', 'Say one word.', 'Speak clearly, then stop and wait for the next timer.');
+  timeDisplay.textContent = timeLeft.toFixed(1);
+  renderArc(1);
+
   timerId = setInterval(() => {
     timeLeft = Math.max(0, timeLeft - 0.1);
     timeDisplay.textContent = timeLeft.toFixed(1);
@@ -97,28 +331,56 @@ function startCycle(secs) {
 
 function stopCycle() {
   clearInterval(timerId);
-  renderArc(0); timeDisplay.textContent = '—'; statusText.textContent = 'WAITING';
+  renderArc(0);
+  timeDisplay.textContent = '--';
+  setState('processing', 'Please wait', 'Response recorded.', 'Do not speak now. The next timer will start soon.');
 }
 
-// ── Polling ───────────────────────────────────────────────────────────────────
 function handleEvent(event, data) {
   switch(event) {
-    case 'cycle_start':      startCycle(data.window_seconds); break;
-    case 'cycle_end':        stopCycle(); break;
-    case 'iti_change':       if (data.active) statusText.textContent = ''; break;
+    case 'session_started':
+      setState('wait', 'Get ready', 'Session starting.', 'Wait for the instruction screen or the countdown timer.');
+      break;
+    case 'cycle_start':
+      startCycle(data.window_seconds);
+      break;
+    case 'cycle_end':
+      stopCycle();
+      break;
+    case 'iti_change':
+      if (data.active) setState('wait', 'Please wait', 'Next trial soon.', 'Do not speak during this pause.');
+      break;
     case 'instruction':
-      instrText.textContent = data.text.trim();
-      instrOverlay.classList.add('show'); break;
+      clearInterval(timerId);
+      renderArc(0);
+      timeDisplay.textContent = '--';
+      instrText.textContent = (data.text || '').trim();
+      instrOverlay.classList.add('show');
+      setState('wait', 'Instructions', 'Read the screen.', 'The experimenter will continue when you are ready.');
+      break;
     case 'instruction_done':
       instrOverlay.classList.remove('show');
-      statusText.textContent = 'WAITING TO START';
-      renderArc(0); timeDisplay.textContent = '—'; break;
+      setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
+      break;
     case 'pause_change':
-      if (data.paused) { clearInterval(timerId); pauseOverlay.classList.add('show'); }
-      else pauseOverlay.classList.remove('show'); break;
-    case 'session_started':  statusText.textContent = 'STARTING...'; break;
-    case 'session_ended':    stopCycle(); statusText.textContent = 'SESSION COMPLETE'; break;
-    case 'session_stopped':  stopCycle(); break;
+      if (data.paused) {
+        clearInterval(timerId);
+        pauseOverlay.classList.add('show');
+        setState('paused', 'Paused', 'Please wait.', 'The experimenter has paused the session.');
+      } else {
+        pauseOverlay.classList.remove('show');
+        setState('wait', 'Please wait', 'Resuming.', 'Speak only when the countdown appears.');
+      }
+      break;
+    case 'session_complete':
+    case 'session_ended':
+      stopCycle();
+      setState('wait', 'Complete', 'Session complete.', 'Please wait for the experimenter.');
+      break;
+    case 'session_stopped':
+      stopCycle();
+      setState('wait', 'Stopped', 'Session stopped.', 'Please wait for the experimenter.');
+      break;
   }
 }
 
@@ -126,10 +388,16 @@ async function poll() {
   try {
     const r = await fetch('/poll?since=' + lastSeq);
     const events = await r.json();
-    for (const e of events) { handleEvent(e.event, e.data); lastSeq = Math.max(lastSeq, e.seq); }
+    for (const e of events) {
+      handleEvent(e.event, e.data || {});
+      lastSeq = Math.max(lastSeq, e.seq);
+    }
   } catch(_) {}
   setTimeout(poll, 200);
 }
+
+setState('idle', 'Waiting', 'Wait for the timer.', 'Speak only when the countdown is visible and the screen says "Speak now."');
+renderArc(0);
 poll();
 </script>
 </body>
