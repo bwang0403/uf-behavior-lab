@@ -47,7 +47,22 @@ _FILLERS = {
     "so", "well", "yeah", "yes", "no", "the", "a", "an",
 }
 
-def transcribe(model: WhisperModel, wav_path: str, language: str = "en") -> tuple[str, str]:
+def _build_asr_prompt(vocabulary: list[str] | None) -> str | None:
+    if not vocabulary:
+        return None
+    words = ", ".join(vocabulary)
+    return (
+        "The speaker says one clear English word from this experiment. "
+        f"Possible words include: {words}."
+    )
+
+
+def transcribe(
+    model: WhisperModel,
+    wav_path: str,
+    language: str = "en",
+    vocabulary: list[str] | None = None,
+) -> tuple[str, str]:
     """
     Run Whisper on a wav file.
     Return:
@@ -57,7 +72,16 @@ def transcribe(model: WhisperModel, wav_path: str, language: str = "en") -> tupl
     Uses Regex to replace non-alphabet characters with spaces, preventing 
     Whisper from merging words (e.g., "um...apple" -> "um apple").
     """
-    segments, _ = model.transcribe(wav_path, language=language)
+    prompt = _build_asr_prompt(vocabulary)
+    transcribe_kwargs = {
+        "language": language,
+        "condition_on_previous_text": False,
+    }
+    if prompt:
+        transcribe_kwargs["initial_prompt"] = prompt
+        transcribe_kwargs["hotwords"] = " ".join(vocabulary)
+
+    segments, _ = model.transcribe(wav_path, **transcribe_kwargs)
 
     transcript_parts = []
     words = []
@@ -253,6 +277,11 @@ class ExperimentRunner:
             "target": target,
         }
 
+    def _current_vocabulary(self, reinforced_list: int | None = None) -> list[str]:
+        if reinforced_list is None:
+            return self.list_manager.vocabulary()
+        return self.list_manager.vocabulary([reinforced_list])
+
     def _notify_phase_change(self, info: dict):
         if self.on_phase_change:
             self.on_phase_change(info)
@@ -318,7 +347,12 @@ class ExperimentRunner:
                 streak += 1
                 print(f"  [Practice] Cycle {cycle:02d} | No response (streak: {streak})")
             else:
-                word, transcript = transcribe(self.model, wav_path, self.cfg["asr"]["language"])
+                word, transcript = transcribe(
+                    self.model,
+                    wav_path,
+                    self.cfg["asr"]["language"],
+                    vocabulary=practice_manager.vocabulary([99]),
+                )
                 cleanup_audio_file(wav_path)
 
                 if not word:
@@ -405,7 +439,12 @@ class ExperimentRunner:
 
             else:
                 # Transcribe
-                word, transcript = transcribe(self.model, wav_path, self.cfg["asr"]["language"])
+                word, transcript = transcribe(
+                    self.model,
+                    wav_path,
+                    self.cfg["asr"]["language"],
+                    vocabulary=self._current_vocabulary(reinforced_list),
+                )
                 cleanup_audio_file(wav_path)
 
                 if not word:

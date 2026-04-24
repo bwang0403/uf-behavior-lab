@@ -131,6 +131,16 @@ class ListManager:
     def remaining_count(self, list_num: int) -> int:
         return len(self.available.get(list_num, set()))
 
+    def vocabulary(self, list_nums: list[int] | None = None) -> list[str]:
+        """Return sorted canonical words for ASR prompting."""
+        if list_nums is None:
+            words = set().union(*self.full_lists.values()) if self.full_lists else set()
+        else:
+            words = set()
+            for list_num in list_nums:
+                words.update(self.full_lists.get(list_num, set()))
+        return sorted(words)
+
 
 # ─── Quick Test ───────────────────────────────────────────────────────────────
 

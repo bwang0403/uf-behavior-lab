@@ -51,6 +51,7 @@ def record_until_silence(
     silence_cutoff: float = 0.4,     # stop after this many seconds of silence post-speech
     silence_threshold: float = 0.01, # RMS amplitude below this = silence
     chunk_duration: float = 0.05,    # process audio in 50ms chunks
+    min_audio_seconds: float = 1.2,  # Whisper is less reliable on very short isolated words
 ) -> tuple[str | None, float | None]:
     """
     Record from microphone. Stop early if silence is detected after speech.
@@ -111,6 +112,9 @@ def record_until_silence(
         else:
             # Downmix to mono so ASR sees a consistent input format.
             audio = np.mean(audio, axis=1)
+    min_samples = int(sample_rate * min_audio_seconds)
+    if audio.shape[0] < min_samples:
+        audio = np.pad(audio, (0, min_samples - audio.shape[0]))
 
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp_path = tmp.name
