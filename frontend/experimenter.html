@@ -462,10 +462,16 @@ function updatePhaseContext(data) {
   $('v-phase').textContent = name;
   $('v-target').textContent = data.target || '--';
   if (data.mode === 'practice') {
+    $('btn-next').querySelector('strong').textContent = 'Skip practice';
+    $('btn-next').querySelector('span').textContent = 'Ends practice and moves to Phase 1. Does not skip Phase 1.';
     setStatus('Practice round', 'Practice words can earn the chime. Formal data is not logged during practice.', 'info');
   } else if (data.reinforced_list === null) {
+    $('btn-next').querySelector('strong').textContent = 'Next phase';
+    $('btn-next').querySelector('span').textContent = 'Manual override. Use for testing or approved pilot cases only.';
     setStatus(name, 'Extinction phase: responses are recorded, but no words earn the chime.', 'busy');
   } else {
+    $('btn-next').querySelector('strong').textContent = 'Next phase';
+    $('btn-next').querySelector('span').textContent = 'Manual override. Use for testing or approved pilot cases only.';
     setStatus(name, `Current rule: ${data.target}.`, 'info');
   }
 }

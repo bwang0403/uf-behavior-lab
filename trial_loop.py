@@ -168,6 +168,9 @@ class ExperimentRunner:
         self._pause_event = threading.Event()
         self._pause_event.set()  # starts in "not paused" (set = go)
         self._force_phase_switch = False
+        self._skip_practice = False
+        self.in_practice = False
+        self.in_formal_phase = False
 
         self._instruction_event = threading.Event()
         self._instruction_event.set()  # starts cleared by show_instruction()
@@ -292,10 +295,14 @@ class ExperimentRunner:
 
     def force_next_phase(self):
         """
-        Immediately advance to the next phase (thread-safe).
+        Immediately advance to the next formal phase (thread-safe).
         Called from the GUI thread via experimenter panel button.
         """
-        self._force_phase_switch = True
+        if self.in_practice:
+            self._skip_practice = True
+            self._instruction_event.set()
+        elif self.in_formal_phase:
+            self._force_phase_switch = True
 
     def _run_practice(self):
         """
@@ -306,9 +313,13 @@ class ExperimentRunner:
         if not self.running or not practice_cfg.get("enabled", False):
             return
 
+        self.in_practice = True
+        self._skip_practice = False
+
         list_path = resolve(practice_cfg["list"])
         if not os.path.exists(list_path):
             print(f"  [Practice] List not found: {list_path} - skipping practice.")
+            self.in_practice = False
             return
 
         streak_limit = practice_cfg.get("no_response_streak", 3)
@@ -319,6 +330,7 @@ class ExperimentRunner:
         if prac_instr:
             self._show_instruction(prac_instr)
             if not self.running:
+                self.in_practice = False
                 return
 
         # Load practice words into a temporary ListManager
@@ -335,7 +347,10 @@ class ExperimentRunner:
         streak = 0
         cycle  = 0
 
-        while self.running and streak < streak_limit and not practice_manager.is_exhausted(99):
+        while (self.running
+               and not self._skip_practice
+               and streak < streak_limit
+               and not practice_manager.is_exhausted(99)):
             self._wait_if_paused()
             if not self.running:
                 break
@@ -383,6 +398,8 @@ class ExperimentRunner:
                     self.on_iti(False)
 
         print("--- Practice complete ---\n")
+        self.in_practice = False
+        self._skip_practice = False
 
     def run(self):
         """Start the experiment. Blocks until all phases complete or stop() is called."""
@@ -405,6 +422,7 @@ class ExperimentRunner:
         if self.running:
             self._run_practice()
 
+        self.in_formal_phase = True
         while self.running and self.current_phase_idx < len(self.cfg["phases"]):
             phase = self.current_phase
             reinforced_list = phase["reinforced_list"]
@@ -536,6 +554,7 @@ class ExperimentRunner:
                     self._show_instruction(msg)
 
         # ── Session End ───────────────────────────────────────────────────────
+        self.in_formal_phase = False
         self.running = False  # ensure flag is cleared after natural completion
         export = self.cfg["data"].get("export_csv", True)
         csv_path = self.logger.close(export_csv=export)
