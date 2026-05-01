@@ -1,0 +1,10 @@
+apple
+mountain
+pencil
+window
+flower
+bottle
+river
+cloud
+candle
+stone

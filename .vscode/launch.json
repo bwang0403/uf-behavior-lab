@@ -1,0 +1,42 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Experiment",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "python": "D:\\Anaconda3\\envs\\resurgence\\python.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Test: matcher",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/matcher.py",
+            "python": "D:\\Anaconda3\\envs\\resurgence\\python.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test: logger",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/logger.py",
+            "python": "D:\\Anaconda3\\envs\\resurgence\\python.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test: audio",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/audio.py",
+            "python": "D:\\Anaconda3\\envs\\resurgence\\python.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        }
+    ]
+}

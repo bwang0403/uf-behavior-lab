@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Participant Screen</title>
+<style>
+  :root {
+    --bg: #07120f;
+    --panel: #f7efe0;
+    --ink: #10231d;
+    --muted: #6f7b72;
+    --blue: #2d6cdf;
+    --green: #0f9f6e;
+    --amber: #d89018;
+    --red: #c94a32;
+    --ring: 1319;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    min-height: 100vh;
+    overflow: hidden;
+    color: var(--ink);
+    font-family: "Trebuchet MS", "Gill Sans", sans-serif;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(45, 108, 223, .34), transparent 32%),
+      radial-gradient(circle at 82% 18%, rgba(15, 159, 110, .26), transparent 28%),
+      linear-gradient(135deg, #07120f 0%, #10231d 54%, #1c150d 100%);
+    display: grid;
+    place-items: center;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(247, 239, 224, .055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(247, 239, 224, .055) 1px, transparent 1px);
+    background-size: 46px 46px;
+    mask-image: radial-gradient(circle at center, black 0%, transparent 72%);
+    pointer-events: none;
+  }
+
+  .shell {
+    position: relative;
+    width: min(1120px, 92vw);
+    min-height: min(720px, 88vh);
+    display: grid;
+    grid-template-columns: 1fr 500px;
+    gap: 34px;
+    align-items: center;
+    z-index: 1;
+  }
+
+  .prompt-card {
+    background: rgba(247, 239, 224, .96);
+    border: 1px solid rgba(247, 239, 224, .5);
+    border-radius: 34px;
+    padding: clamp(34px, 5vw, 62px);
+    min-height: 470px;
+    box-shadow: 0 28px 90px rgba(0, 0, 0, .38);
+  }
+
+  #mode-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: rgba(16, 35, 29, .08);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+  }
+
+  #mode-label::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  h1 {
+    margin-top: 28px;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(52px, 7vw, 96px);
+    line-height: .92;
+    letter-spacing: -.06em;
+  }
+
+  #sub-prompt {
+    margin-top: 24px;
+    max-width: 580px;
+    color: #425148;
+    font-size: clamp(22px, 2.4vw, 31px);
+    line-height: 1.32;
+  }
+
+  .rule-strip {
+    margin-top: 42px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .rule {
+    min-height: 78px;
+    border-radius: 18px;
+    padding: 16px;
+    background: #eadfc9;
+    color: #314139;
+    font-size: 16px;
+    line-height: 1.25;
+  }
+
+  .rule b {
+    display: block;
+    margin-bottom: 5px;
+    color: #10231d;
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+
+  .timer-card {
+    position: relative;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+  }
+
+  .timer-card svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 22px 35px rgba(0, 0, 0, .28));
+  }
+
+  .ring-bg { stroke: rgba(247, 239, 224, .16); }
+  #arc {
+    stroke: #ffffff;
+    transition: stroke .25s ease, stroke-dashoffset .1s linear;
+  }
+
+  .time-cluster {
+    position: relative;
+    width: 330px;
+    height: 330px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: rgba(247, 239, 224, .94);
+    box-shadow: inset 0 0 0 1px rgba(16, 35, 29, .08);
+  }
+
+  #time-display, #sec-label {
+    display: none !important;
+  }
+
+  body[data-state="speak"] #sub-prompt,
+  body[data-state="speak"] .rule-strip,
+  body[data-state="processing"] #sub-prompt,
+  body[data-state="processing"] .rule-strip,
+  body[data-state="wait"] #sub-prompt,
+  body[data-state="wait"] .rule-strip {
+    display: none !important;
+  }
+
+  body[data-state="speak"] #mode-label { color: var(--green); background: rgba(15, 159, 110, .12); }
+  body[data-state="speak"] #arc { stroke: #ffffff; }
+  body[data-state="speak"] .prompt-card { animation: lift .42s ease both; }
+  body[data-state="wait"] #mode-label,
+  body[data-state="processing"] #mode-label { color: var(--amber); background: rgba(216, 144, 24, .14); }
+  body[data-state="paused"] #mode-label { color: var(--red); background: rgba(201, 74, 50, .14); }
+
+  @keyframes lift {
+    from { transform: translateY(14px); opacity: .9; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    align-items: center;
+    justify-content: center;
+    padding: 44px;
+    background:
+      radial-gradient(circle at 50% 30%, rgba(45, 108, 223, .24), transparent 36%),
+      rgba(7, 18, 15, .96);
+  }
+
+  .overlay.show { display: flex; }
+
+  .overlay-card {
+    width: min(820px, 92vw);
+    padding: clamp(34px, 5vw, 62px);
+    border-radius: 34px;
+    background: var(--panel);
+    box-shadow: 0 34px 100px rgba(0, 0, 0, .42);
+    text-align: center;
+  }
+
+  .overlay-card h2 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(42px, 6vw, 78px);
+    letter-spacing: -.05em;
+    line-height: .95;
+  }
+
+  #instruction-text,
+  #pause-text {
+    margin-top: 24px;
+    color: #2f4238;
+    font-size: clamp(24px, 3vw, 34px);
+    line-height: 1.5;
+    white-space: pre-line;
+  }
+
+  #participant-start-btn {
+    margin-top: 40px;
+    padding: 16px 48px;
+    font-size: 22px;
+    font-weight: bold;
+    color: #fff;
+    background-color: var(--green);
+    border: none;
+    border-radius: 99px;
+    cursor: pointer;
+    box-shadow: 0 10px 20px rgba(15, 159, 110, 0.3);
+    transition: transform 0.2s, background-color 0.2s;
+  }
+  
+  #participant-start-btn:hover {
+    background-color: #0d8a5f;
+    transform: translateY(-2px);
+  }
+
+  @media (max-width: 980px) {
+    .shell {
+      grid-template-columns: 1fr;
+      min-height: auto;
+      padding: 28px 0;
+    }
+    .timer-card {
+      max-width: 460px;
+      margin: 0 auto;
+    }
+    .rule-strip { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body data-state="idle">
+<main class="shell" aria-live="polite">
+  <section class="prompt-card">
+    <div id="mode-label">Waiting</div>
+    <h1 id="main-prompt">Wait for the timer.</h1>
+    <p id="sub-prompt">Speak only when the countdown is visible and the screen says "Speak now."</p>
+    <div class="rule-strip">
+      <div class="rule"><b>When to speak</b>During the 3-second timer.</div>
+      <div class="rule"><b>What to say</b>One clear English word.</div>
+      <div class="rule"><b>When to wait</b>When the screen says please wait.</div>
+    </div>
+  </section>
+
+  <section class="timer-card" aria-label="response timer">
+    <svg viewBox="0 0 520 520" aria-hidden="true">
+      <circle class="ring-bg" cx="260" cy="260" r="210" fill="none" stroke-width="22"/>
+      <circle id="arc" cx="260" cy="260" r="210" fill="none" stroke-width="22"
+              stroke-dasharray="1319" stroke-dashoffset="1319" stroke-linecap="round"
+              transform="rotate(-90 260 260)"/>
+    </svg>
+    <div class="time-cluster">
+      <div id="time-display">--</div>
+      <div id="sec-label">seconds</div>
+    </div>
+  </section>
+</main>
+
+<div id="instruction-overlay" class="overlay">
+  <div class="overlay-card">
+    <h2>Instructions</h2>
+    <div id="instruction-text"></div>
+    <button id="participant-start-btn">Start Task</button>
+  </div>
+</div>
+
+<div id="pause-overlay" class="overlay">
+  <div class="overlay-card">
+    <h2>Paused</h2>
+    <div id="pause-text">Please wait. The experimenter will resume the session.</div>
+  </div>
+</div>
+
+<script>
+const CIRC = 2 * Math.PI * 210;
+const arc = document.getElementById('arc');
+const timeDisplay = document.getElementById('time-display');
+const modeLabel = document.getElementById('mode-label');
+const mainPrompt = document.getElementById('main-prompt');
+const subPrompt = document.getElementById('sub-prompt');
+const instrOverlay = document.getElementById('instruction-overlay');
+const instrText = document.getElementById('instruction-text');
+const pauseOverlay = document.getElementById('pause-overlay');
+const startBtn = document.getElementById('participant-start-btn');
+
+let windowSeconds = 3;
+let timeLeft = 0;
+let timerId = null;
+let lastSeq = 0;
+
+function setState(state, label, main, sub) {
+  document.body.dataset.state = state;
+  modeLabel.textContent = label;
+  mainPrompt.textContent = main;
+  subPrompt.textContent = sub;
+}
+
+function renderArc(ratio) {
+  arc.setAttribute('stroke-dashoffset', CIRC * (1 - ratio));
+}
+
+function startCycle(secs) {
+  windowSeconds = secs || 3;
+  timeLeft = windowSeconds;
+  clearInterval(timerId);
+  setState('speak', 'Speak now', 'Say one word.', 'Speak clearly, then stop and wait for the next timer.');
+  timeDisplay.textContent = timeLeft.toFixed(1);
+  renderArc(1);
+
+  timerId = setInterval(() => {
+    timeLeft = Math.max(0, timeLeft - 0.1);
+    timeDisplay.textContent = timeLeft.toFixed(1);
+    renderArc(timeLeft / windowSeconds);
+    if (timeLeft <= 0) clearInterval(timerId);
+  }, 100);
+}
+
+function stopCycle() {
+  clearInterval(timerId);
+  renderArc(0);
+  timeDisplay.textContent = '--';
+  setState('processing', 'Please wait', 'Response recorded.', 'Do not speak now. The next timer will start soon.');
+}
+
+startBtn.addEventListener('click', () => {
+  startBtn.style.display = 'none';
+  
+  // 智能判断当前是什么界面
+  const currentText = instrText.textContent || "";
+  
+  // 如果是最初的 Welcome 界面，直接跳过倒计时，秒进下一步（通常是 Practice）
+  if (currentText.includes('Welcome') || currentText.includes('complete')) {
+    instrOverlay.classList.remove('show');
+    setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
+    fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
+    return;
+  }
+
+  // 否则（真正的 Practice 界面或者下一个 Phase），触发 3-2-1 倒计时
+  let count = 3;
+  instrText.innerHTML = `<div style="font-size: 30px; margin-bottom: 20px;">The phase is starting in</div><div style="font-size: 100px; font-weight: bold; color: var(--green);">${count}</div>`;
+  
+  let cd = setInterval(() => {
+    count--;
+    if (count > 0) {
+      instrText.innerHTML = `<div style="font-size: 30px; margin-bottom: 20px;">The phase is starting in</div><div style="font-size: 100px; font-weight: bold; color: var(--green);">${count}</div>`;
+    } else {
+      clearInterval(cd);
+      instrOverlay.classList.remove('show');
+      setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
+      fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
+    }
+  }, 1000);
+});
+
+function handleEvent(event, data) {
+  switch(event) {
+    case 'session_started':
+      setState('wait', 'Get ready', 'Session starting.', 'Wait for the instruction screen or the countdown timer.');
+      break;
+    case 'cycle_start':
+      startCycle(data.window_seconds);
+      break;
+    case 'cycle_end':
+      stopCycle();
+      break;
+    case 'iti_change':
+      if (data.active) setState('wait', 'Please wait', 'Next trial soon.', 'Do not speak during this pause.');
+      break;
+    case 'instruction':
+      clearInterval(timerId);
+      renderArc(0);
+      timeDisplay.textContent = '--';
+      instrText.textContent = (data.text || '').trim();
+      startBtn.style.display = 'inline-block'; 
+      instrOverlay.classList.add('show');
+      setState('wait', 'Instructions', 'Read the screen.', 'Click the button below when you are ready to begin.');
+      break;
+    case 'instruction_done':
+      instrOverlay.classList.remove('show');
+      setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
+      break;
+    case 'pause_change':
+      if (data.paused) {
+        clearInterval(timerId);
+        pauseOverlay.classList.add('show');
+        setState('paused', 'Paused', 'Please wait.', 'The experimenter has paused the session.');
+      } else {
+        pauseOverlay.classList.remove('show');
+        setState('wait', 'Please wait', 'Resuming.', 'Speak only when the countdown appears.');
+      }
+      break;
+    case 'session_complete':
+    case 'session_ended':
+      stopCycle();
+      setState('wait', 'Complete', 'Session complete.', 'Please wait for the experimenter.');
+      break;
+    case 'session_stopped':
+      stopCycle();
+      setState('wait', 'Stopped', 'Session stopped.', 'Please wait for the experimenter.');
+      break;
+  }
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/poll?since=' + lastSeq);
+    const events = await r.json();
+    for (const e of events) {
+      handleEvent(e.event, e.data || {});
+      lastSeq = Math.max(lastSeq, e.seq);
+    }
+  } catch(_) {}
+  setTimeout(poll, 200);
+}
+
+setState('idle', 'Waiting', 'Wait for the timer.', 'Speak only when the countdown is visible and the screen says "Speak now."');
+renderArc(0);
+poll();
+</script>
+</body>
+</html>
