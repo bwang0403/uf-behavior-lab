@@ -36,6 +36,31 @@ def participant():
 def get_config():
     with open(BASE_DIR / "config.yaml", "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
+        
+    # Helper: read words from txt files
+    def read_list(filepath):
+        p = BASE_DIR / filepath
+        if p.exists():
+            with open(p, "r", encoding="utf-8") as lf:
+                return [line.strip() for line in lf if line.strip()]
+        return []
+
+    # Parse and load all word lists based on config
+    list_cfg = cfg.get("lists", {})
+    list_path = list_cfg.get("path", "")
+    
+    word_lists = {}
+    for key, filename in list_cfg.items():
+        if key.startswith("list") and key != "path":
+            num = int(key.replace("list", ""))
+            full_p = os.path.join(list_path, filename)
+            word_lists[num] = read_list(full_p)
+
+    practice_list = []
+    prac_file = cfg.get("practice", {}).get("list")
+    if prac_file:
+        practice_list = read_list(prac_file)
+
     return jsonify({
         "participant_id": cfg["experiment"]["participant_id"],
         "group":          cfg["experiment"]["group"],
@@ -43,6 +68,9 @@ def get_config():
         "practice_enabled": cfg.get("practice", {}).get("enabled", False),
         "asr_provider":   cfg.get("asr", {}).get("provider", "local"),
         "model_ready":    _model_ready,
+        "phases":         cfg.get("phases", []),
+        "word_lists":     word_lists,
+        "practice_list":  practice_list
     })
 
 @app.route("/poll")

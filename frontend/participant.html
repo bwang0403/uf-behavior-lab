@@ -62,6 +62,9 @@
     padding: clamp(34px, 5vw, 62px);
     min-height: 470px;
     box-shadow: 0 28px 90px rgba(0, 0, 0, .38);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
 
   #mode-label {
@@ -76,6 +79,7 @@
     font-weight: 800;
     letter-spacing: .18em;
     text-transform: uppercase;
+    align-self: flex-start;
   }
 
   #mode-label::before {
@@ -103,7 +107,8 @@
   }
 
   .rule-strip {
-    margin-top: 42px;
+    margin-top: auto;
+    padding-top: 42px;
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 12px;
@@ -244,17 +249,20 @@
     transform: translateY(-2px);
   }
 
-  @media (max-width: 980px) {
-    .shell {
-      grid-template-columns: 1fr;
-      min-height: auto;
-      padding: 28px 0;
-    }
-    .timer-card {
-      max-width: 460px;
-      margin: 0 auto;
-    }
-    .rule-strip { grid-template-columns: 1fr; }
+  /* Word Flash Animation */
+  .flash-word {
+    font-size: clamp(60px, 8vw, 120px);
+    font-weight: bold;
+    color: var(--blue);
+    text-transform: uppercase;
+    animation: fadeInOut 2s ease-in-out;
+  }
+
+  @keyframes fadeInOut {
+    0% { opacity: 0; transform: scale(0.95); }
+    15% { opacity: 1; transform: scale(1); }
+    85% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.05); }
   }
 </style>
 </head>
@@ -287,7 +295,7 @@
 
 <div id="instruction-overlay" class="overlay">
   <div class="overlay-card">
-    <h2>Instructions</h2>
+    <h2 id="overlay-title">Instructions</h2>
     <div id="instruction-text"></div>
     <button id="participant-start-btn">Start Task</button>
   </div>
@@ -308,6 +316,7 @@ const modeLabel = document.getElementById('mode-label');
 const mainPrompt = document.getElementById('main-prompt');
 const subPrompt = document.getElementById('sub-prompt');
 const instrOverlay = document.getElementById('instruction-overlay');
+const overlayTitle = document.getElementById('overlay-title');
 const instrText = document.getElementById('instruction-text');
 const pauseOverlay = document.getElementById('pause-overlay');
 const startBtn = document.getElementById('participant-start-btn');
@@ -316,6 +325,47 @@ let windowSeconds = 3;
 let timeLeft = 0;
 let timerId = null;
 let lastSeq = 0;
+
+// --- Frontend Phase Tracking Logic ---
+let expConfig = null;
+let phaseCounter = 0; // Tracks which regular Phase we are about to enter (0 = Phase 1)
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/config');
+    expConfig = await r.json();
+  } catch(err) { console.error(err); }
+}
+loadConfig();
+
+// Fisher-Yates Shuffle
+function shuffle(array) {
+  let arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Get words securely by phase index
+function getWordsForPhase(idx) {
+  if (!expConfig || !expConfig.phases || !expConfig.phases[idx]) return [];
+  let words = [];
+  const phaseCfg = expConfig.phases[idx];
+  const rList = phaseCfg.reinforced_list;
+  const eLists = phaseCfg.extinction_lists || [];
+
+  if (rList && expConfig.word_lists[rList]) {
+    words.push(...expConfig.word_lists[rList]);
+  }
+  for (const el of eLists) {
+    if (expConfig.word_lists[el]) {
+      words.push(...expConfig.word_lists[el]);
+    }
+  }
+  return [...new Set(words)]; // Return unique words
+}
 
 function setState(state, label, main, sub) {
   document.body.dataset.state = state;
@@ -332,7 +382,9 @@ function startCycle(secs) {
   windowSeconds = secs || 3;
   timeLeft = windowSeconds;
   clearInterval(timerId);
+  
   setState('speak', 'Speak now', 'Say one word.', 'Speak clearly, then stop and wait for the next timer.');
+  
   timeDisplay.textContent = timeLeft.toFixed(1);
   renderArc(1);
 
@@ -351,21 +403,8 @@ function stopCycle() {
   setState('processing', 'Please wait', 'Response recorded.', 'Do not speak now. The next timer will start soon.');
 }
 
-startBtn.addEventListener('click', () => {
-  startBtn.style.display = 'none';
-  
-  // 智能判断当前是什么界面
-  const currentText = instrText.textContent || "";
-  
-  // 如果是最初的 Welcome 界面，直接跳过倒计时，秒进下一步（通常是 Practice）
-  if (currentText.includes('Welcome') || currentText.includes('complete')) {
-    instrOverlay.classList.remove('show');
-    setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
-    fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
-    return;
-  }
-
-  // 否则（真正的 Practice 界面或者下一个 Phase），触发 3-2-1 倒计时
+function runCountdown() {
+  overlayTitle.textContent = "Get Ready";
   let count = 3;
   instrText.innerHTML = `<div style="font-size: 30px; margin-bottom: 20px;">The phase is starting in</div><div style="font-size: 100px; font-weight: bold; color: var(--green);">${count}</div>`;
   
@@ -380,11 +419,69 @@ startBtn.addEventListener('click', () => {
       fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
     }
   }, 1000);
+}
+
+function flashWordsOneByOne(words, callback) {
+  if (!words || words.length === 0) {
+    callback();
+    return;
+  }
+  
+  overlayTitle.textContent = "Word List";
+  let i = 0;
+  
+  function showNext() {
+    if (i >= words.length) {
+      callback();
+      return;
+    }
+    instrText.innerHTML = `<div class="flash-word">${words[i]}</div>`;
+    i++;
+    setTimeout(showNext, 2000);
+  }
+  
+  showNext();
+}
+
+startBtn.addEventListener('click', () => {
+  startBtn.style.display = 'none';
+  const currentText = instrText.textContent || "";
+  let wordsToShow = [];
+  
+  // 1. Welcome Screen or End Screen -> Skip directly, no countdown
+  if (currentText.includes('Welcome') || currentText.includes('complete')) {
+    instrOverlay.classList.remove('show');
+    setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
+    fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
+    return;
+  }
+
+  // 2. Practice Round
+  if (currentText.includes('Practice')) {
+    wordsToShow = expConfig.practice_list || [];
+  } 
+  // 3. Regular Phases (Phase 1, 2, 3...)
+  else if (currentText.includes('ready') || currentText.includes('next')) {
+    wordsToShow = getWordsForPhase(phaseCounter);
+    phaseCounter++; // Advance the counter so NEXT time it flashes the NEXT phase!
+  }
+
+  // If we have words, shuffle and flash them
+  if (wordsToShow.length > 0) {
+    wordsToShow = shuffle(wordsToShow); // Shuffle to make it random!
+    instrText.innerHTML = `<div style="font-size: 26px; color: var(--muted); margin-bottom: 10px;">Please read the following words carefully.</div>`;
+    setTimeout(() => {
+      flashWordsOneByOne(wordsToShow, runCountdown);
+    }, 1500);
+  } else {
+    runCountdown();
+  }
 });
 
 function handleEvent(event, data) {
   switch(event) {
     case 'session_started':
+      phaseCounter = 0; // ALWAYS Reset to Phase 1 (index 0) when a new experiment starts
       setState('wait', 'Get ready', 'Session starting.', 'Wait for the instruction screen or the countdown timer.');
       break;
     case 'cycle_start':
@@ -400,6 +497,7 @@ function handleEvent(event, data) {
       clearInterval(timerId);
       renderArc(0);
       timeDisplay.textContent = '--';
+      overlayTitle.textContent = "Instructions";
       instrText.textContent = (data.text || '').trim();
       startBtn.style.display = 'inline-block'; 
       instrOverlay.classList.add('show');
@@ -407,7 +505,6 @@ function handleEvent(event, data) {
       break;
     case 'instruction_done':
       instrOverlay.classList.remove('show');
-      setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
       break;
     case 'pause_change':
       if (data.paused) {
