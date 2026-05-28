@@ -195,7 +195,7 @@
   #btn-continue {
     display: none;
     width: 100%;
-    background: #15231d;
+    background: #c94a32;
     animation: breathe 1.25s ease-in-out infinite;
   }
 
@@ -351,8 +351,8 @@
           </button>
         </div>
         <button id="btn-continue" onclick="acknowledge()">
-          <strong>Continue</strong>
-          <span>Click only after the participant has read the instruction screen.</span>
+          <strong>Force continue</strong>
+          <span>Only click if participant is stuck. Let them pace themselves!</span>
         </button>
       </section>
 
@@ -456,7 +456,7 @@ function handleEvent(event, data) {
       break;
     case 'instruction':
       $('btn-continue').style.display = 'block';
-      setStatus('Instruction screen', 'Participant is reading instructions. Click Continue when ready.', 'info');
+      setStatus('Participant Setup', 'Participant is viewing instructions and flashing words. Let them self-pace.', 'info');
       break;
     case 'instruction_done':
       $('btn-continue').style.display = 'none';
@@ -536,19 +536,16 @@ function updatePhaseContext(data) {
     setBtn('btn-restart-phase', false);
     $('btn-next').querySelector('strong').textContent = 'Skip practice';
     $('btn-next').querySelector('span').textContent = 'Ends practice and moves to Phase 1. Does not skip Phase 1.';
-    setStatus('Practice round', 'Practice words can earn the chime. Formal data is not logged during practice.', 'info');
   } else if (data.reinforced_list === null) {
     setBtn('btn-restart-practice', false);
     setBtn('btn-restart-phase', true);
     $('btn-next').querySelector('strong').textContent = 'Next phase';
     $('btn-next').querySelector('span').textContent = 'Manual override. Use for testing or approved pilot cases only.';
-    setStatus(name, 'Extinction phase: responses are recorded, but no words earn the chime.', 'busy');
   } else {
     setBtn('btn-restart-practice', false);
     setBtn('btn-restart-phase', true);
     $('btn-next').querySelector('strong').textContent = 'Next phase';
     $('btn-next').querySelector('span').textContent = 'Manual override. Use for testing or approved pilot cases only.';
-    setStatus(name, `Current rule: ${data.target}.`, 'info');
   }
 }
 

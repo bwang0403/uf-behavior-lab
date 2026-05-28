@@ -18,14 +18,13 @@ from pathlib import Path
 
 try:
     from faster_whisper import WhisperModel
-except ImportError:  # Optional when using a hosted ASR provider.
+except ImportError:
     WhisperModel = None
 
 from matcher import ListManager
 from logger import SessionLogger
 from audio import record_until_silence, play_reinforcement, cleanup_audio_file, generate_reward_wav
 
-# All relative paths in config are resolved against this directory
 BASE_DIR = Path(__file__).parent
 
 
@@ -36,16 +35,12 @@ def load_config(path: str = "config.yaml") -> dict:
     with open(resolved, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
-
 def resolve(relative_path: str) -> str:
-    """Resolve a config-relative path to an absolute path."""
     return str(BASE_DIR / relative_path)
-
 
 # ─── ASR ──────────────────────────────────────────────────────────────────────
 import re
 
-# Common English filler words to skip when extracting the participant's response
 _FILLERS = {
     "um", "uh", "er", "ah", "like", "hmm", "hm", "oh", "okay", "ok",
     "so", "well", "yeah", "yes", "no", "the", "a", "an",
@@ -61,11 +56,9 @@ def _build_asr_prompt(vocabulary: list[str] | None) -> str | None:
         f"The closed-set vocabulary is: {words}."
     )
 
-
 def _clean_words(text: str) -> list[str]:
     clean_text = re.sub(r"[^a-zA-Z\s]", " ", text or "")
     return [w.lower() for w in clean_text.split()]
-
 
 def _extract_response_word(
     transcript: str,
@@ -78,25 +71,19 @@ def _extract_response_word(
 
     if prefer_vocabulary_matches and vocabulary:
         vocab = {re.sub(r"[^a-zA-Z]", "", word).lower(): word.lower() for word in vocabulary}
-
-        # Prefer exact vocabulary words anywhere in the transcript.
         for word in words:
             if word in vocab:
                 return vocab[word]
-
-        # Whisper often splits compound words, e.g. "fire fighter" -> "firefighter".
         for span in (2, 3):
             for i in range(0, len(words) - span + 1):
                 joined = "".join(words[i:i + span])
                 if joined in vocab:
                     return vocab[joined]
-
         joined_all = "".join(words)
         if joined_all in vocab:
             return vocab[joined_all]
 
     return words[0]
-
 
 def _transcribe_local(
     model,
@@ -105,12 +92,8 @@ def _transcribe_local(
     vocabulary: list[str] | None = None,
     asr_cfg: dict | None = None,
 ) -> str:
-    """Run local faster-whisper on a wav file and return the full transcript."""
     if model is None:
-        raise RuntimeError(
-            "Local ASR selected, but faster-whisper is not available. "
-            "Install faster-whisper or set asr.provider to 'openai'."
-        )
+        raise RuntimeError("Local ASR selected, but faster-whisper is not available.")
 
     asr_cfg = asr_cfg or {}
     prompt = _build_asr_prompt(vocabulary)
@@ -124,7 +107,6 @@ def _transcribe_local(
         transcribe_kwargs["hotwords"] = " ".join(vocabulary)
 
     segments, _ = model.transcribe(wav_path, **transcribe_kwargs)
-
     transcript_parts = []
     for seg in segments:
         seg_text = (seg.text or "").strip()
@@ -133,29 +115,20 @@ def _transcribe_local(
 
     return " ".join(transcript_parts).strip()
 
-
 def _transcribe_openai(
     wav_path: str,
     language: str = "en",
     vocabulary: list[str] | None = None,
     asr_cfg: dict | None = None,
 ) -> str:
-    """
-    Run hosted OpenAI transcription.
-    Requires OPENAI_API_KEY and the optional openai package.
-    """
     try:
         from openai import OpenAI
     except ImportError as exc:
-        raise RuntimeError(
-            "OpenAI ASR selected, but the openai package is not installed. "
-            "Run: pip install openai"
-        ) from exc
+        raise RuntimeError("OpenAI ASR selected, but the openai package is not installed.") from exc
 
     asr_cfg = asr_cfg or {}
     model_name = asr_cfg.get("openai_model", "gpt-4o-transcribe")
     prompt = _build_asr_prompt(vocabulary)
-
     client = OpenAI()
     with open(wav_path, "rb") as audio_file:
         request = {
@@ -167,13 +140,11 @@ def _transcribe_openai(
             request["prompt"] = prompt
         if language:
             request["language"] = language
-
         result = client.audio.transcriptions.create(**request)
 
     if isinstance(result, str):
         return result.strip()
     return getattr(result, "text", str(result)).strip()
-
 
 def transcribe(
     model,
@@ -182,11 +153,6 @@ def transcribe(
     vocabulary: list[str] | None = None,
     asr_cfg: dict | None = None,
 ) -> tuple[str, str]:
-    """
-    Transcribe a wav file and return:
-    - the selected response word
-    - the full transcript text for logging / later review
-    """
     asr_cfg = asr_cfg or {}
     provider = str(asr_cfg.get("provider", "local")).lower()
 
@@ -208,13 +174,6 @@ def transcribe(
 # ─── Phase Logic ──────────────────────────────────────────────────────────────
 
 def should_reinforce(match_result: dict, reinforced_list: int | None) -> bool:
-    """
-    Return True if this response earns reinforcement.
-    Rules:
-    - Phase 3 (reinforced_list=None): never reinforce
-    - Must match the reinforced list
-    - Must not be a repeat
-    """
     if reinforced_list is None:
         return False
     return (
@@ -223,19 +182,12 @@ def should_reinforce(match_result: dict, reinforced_list: int | None) -> bool:
         and not match_result["novel"]
     )
 
-
 def check_phase_switch(
     no_response_streak: int,
     streak_threshold: int,
     list_manager: ListManager,
     reinforced_list: int | None,
     ) -> tuple[bool, str]:
-    """
-    Return (should_switch, reason).
-    Two criteria:
-    1. Consecutive no-response cycles >= threshold
-    2. All words on the reinforced list have been said
-    """
     if no_response_streak >= streak_threshold:
         return True, f"{no_response_streak} consecutive cycles with no response"
     if reinforced_list and list_manager.is_exhausted(reinforced_list):
@@ -261,17 +213,17 @@ class ExperimentRunner:
         }
 
         self.on_status      = None
-        self.on_iti         = None   # callback(active: bool) — True=ITI started, False=ended
-        self.on_pause       = None   # callback(paused: bool)
-        self.on_instruction = None   # callback(text: str) — show instruction screen
-        self.on_complete    = None   # callback(summary: dict) — session finished
-        self.on_cycle_start = None   # callback(window_seconds: float)
-        self.on_cycle_end   = None   # callback()
-        self.on_reinforcement = None # callback(info: dict) — chime was triggered
-        self.on_phase_change = None  # callback(info: dict) — practice/phase context changed
+        self.on_iti         = None   
+        self.on_pause       = None   
+        self.on_instruction = None   
+        self.on_complete    = None   
+        self.on_cycle_start = None   
+        self.on_cycle_end   = None   
+        self.on_reinforcement = None 
+        self.on_phase_change = None  
 
         self._pause_event = threading.Event()
-        self._pause_event.set()  # starts in "not paused" (set = go)
+        self._pause_event.set()
         self._force_phase_switch = False
         self._skip_practice = False
         self._restart_practice = False
@@ -280,9 +232,8 @@ class ExperimentRunner:
         self.in_formal_phase = False
 
         self._instruction_event = threading.Event()
-        self._instruction_event.set()  # starts cleared by show_instruction()
+        self._instruction_event.set()
 
-        # Use pre-loaded model if provided
         if model is not None:
             self.model = model
         else:
@@ -290,10 +241,7 @@ class ExperimentRunner:
             provider = str(asr_cfg.get("provider", "local")).lower()
             if provider in {"local", "whisper", "faster-whisper"}:
                 if WhisperModel is None:
-                    raise RuntimeError(
-                        "Local ASR selected, but faster-whisper is not installed. "
-                        "Install faster-whisper or set asr.provider to 'openai'."
-                    )
+                    raise RuntimeError("Local ASR selected, but faster-whisper is not installed.")
                 print(f"Loading Whisper model ({asr_cfg['model_size']})...")
                 self.model = WhisperModel(asr_cfg["model_size"], device="cpu")
                 print("Model ready.")
@@ -321,7 +269,6 @@ class ExperimentRunner:
             group_num=group,
         )
 
-        # Ensure reward sound exists
         reward_path = resolve(self.cfg["audio"]["reinforcement_sound"])
         if not os.path.exists(reward_path):
             generate_reward_wav(reward_path)
@@ -341,8 +288,8 @@ class ExperimentRunner:
 
     def stop(self):
         self.running = False
-        self._pause_event.set()  # unblock if currently paused
-        self._instruction_event.set()  # unblock if waiting on an instruction screen
+        self._pause_event.set()
+        self._instruction_event.set()
 
     def pause(self):
         self._pause_event.clear()
@@ -359,18 +306,15 @@ class ExperimentRunner:
         return not self._pause_event.is_set()
 
     def _wait_if_paused(self):
-        """Block here while paused. Returns immediately if not paused."""
         self._pause_event.wait()
 
-    def _show_instruction(self, text: str):
-        """Display instruction screen and block until experimenter clicks Continue."""
+    def _show_instruction(self, text: str, words_to_flash: list[str] = None, needs_countdown: bool = False):
         if self.on_instruction:
             self._instruction_event.clear()
-            self.on_instruction(text)
-            self._instruction_event.wait()  # blocks until acknowledge_instruction()
+            self.on_instruction(text, words_to_flash or [], needs_countdown)
+            self._instruction_event.wait() 
 
     def _record_response(self) -> tuple[str | None, float | None]:
-        """Record one response window using the experiment config."""
         window_seconds = self.cfg["trial"]["window_seconds"]
         if self.on_cycle_start:
             self.on_cycle_start(window_seconds)
@@ -386,7 +330,6 @@ class ExperimentRunner:
                 self.on_cycle_end()
 
     def _phase_context(self, phase: dict | None = None) -> dict:
-        """Return display metadata for the current formal experiment phase."""
         phase = phase or self.current_phase
         reinforced_list = phase.get("reinforced_list")
         if reinforced_list is None:
@@ -403,7 +346,6 @@ class ExperimentRunner:
         }
 
     def _experiment_vocabulary(self) -> list[str]:
-        """ASR should hear all experiment words; reinforcement is decided later."""
         return self.list_manager.vocabulary()
 
     def _notify_phase_change(self, info: dict):
@@ -411,14 +353,9 @@ class ExperimentRunner:
             self.on_phase_change(info)
 
     def acknowledge_instruction(self):
-        """Called by GUI when experimenter clicks Continue after an instruction screen."""
         self._instruction_event.set()
 
     def force_next_phase(self):
-        """
-        Immediately advance to the next formal phase (thread-safe).
-        Called from the GUI thread via experimenter panel button.
-        """
         if self.in_practice:
             self._skip_practice = True
             self._instruction_event.set()
@@ -426,16 +363,11 @@ class ExperimentRunner:
             self._force_phase_switch = True
 
     def restart_practice(self):
-        """Restart the practice round from a fresh practice list."""
         if self.in_practice:
             self._restart_practice = True
             self._instruction_event.set()
 
     def restart_current_phase(self):
-        """
-        Discard the current formal phase attempt and restart that phase.
-        Existing rows stay in the database with discarded=1.
-        """
         if self.in_practice:
             self.restart_practice()
         elif self.in_formal_phase:
@@ -449,6 +381,7 @@ class ExperimentRunner:
         self.phase_attempts[phase_num] = attempt + 1
         self.no_response_streak = 0
         self._force_phase_switch = False
+        self._last_printed_phase = -1
 
         reinforced_list = self.current_phase.get("reinforced_list")
         if reinforced_list:
@@ -458,10 +391,6 @@ class ExperimentRunner:
         self._notify_phase_change(self._phase_context(self.current_phase))
 
     def _run_practice(self):
-        """
-        Run a practice round before Phase 1.
-        Results are not logged. Word list is separate from experiment lists.
-        """
         practice_cfg = self.cfg.get("practice", {})
         if not self.running or not practice_cfg.get("enabled", False):
             return
@@ -477,11 +406,11 @@ class ExperimentRunner:
 
         streak_limit = practice_cfg.get("no_response_streak", 3)
         trial_cfg    = self.cfg["trial"]
+        practice_manager = ListManager({99: list_path})
 
-        # Show practice instruction
         prac_instr = practice_cfg.get("instruction", "")
         if prac_instr:
-            self._show_instruction(prac_instr)
+            self._show_instruction(prac_instr, practice_manager.vocabulary([99]), needs_countdown=True)
             if not self.running:
                 self.in_practice = False
                 return
@@ -490,9 +419,6 @@ class ExperimentRunner:
         while self.running and not self._skip_practice:
             practice_attempt += 1
             self._restart_practice = False
-
-            # Load practice words into a temporary ListManager.
-            practice_manager = ListManager({99: list_path})  # list 99 = practice
 
             print(f"\n--- Practice Round attempt {practice_attempt} ---")
             self._notify_phase_change({
@@ -567,57 +493,61 @@ class ExperimentRunner:
         self._restart_practice = False
 
     def run(self):
-        """Start the experiment. Blocks until all phases complete or stop() is called."""
         self.running = True
         trial_cfg = self.cfg["trial"]
         streak_threshold = self.cfg["switching"]["no_response_streak"]
+        instr_cfg = self.cfg.get("instructions", {})
 
         print(f"\n=== Session started: {self.logger.session_id} ===")
         print(f"Group: {self.cfg['experiment']['group']}-list\n")
 
-        instr_cfg = self.cfg.get("instructions", {})
         intro_text = instr_cfg.get("intro", "")
-        between_text = instr_cfg.get("between_phases", "")
-
-        # Show intro instruction before Phase 1
         if intro_text:
-            self._show_instruction(intro_text)
+            self._show_instruction(intro_text, [], needs_countdown=False)
 
-        # Run practice round (no-op if disabled)
         if self.running:
             self._run_practice()
-            
-            # --- NEW INTERCEPT LOGIC ---
-            # If practice was enabled, we force the specific Phase 1 instruction
-            # to show BEFORE entering Phase 1 (whether practice ended naturally or was skipped).
-            if self.cfg.get("practice", {}).get("enabled", False) and self.running:
-                msg = "Phase 1 is coming next.\n\nThe real test is about to begin.\n\nPlease get ready."
-                self._show_instruction(msg)
 
         self.in_formal_phase = True
         while self.running and self.current_phase_idx < len(self.cfg["phases"]):
             phase = self.current_phase
-            reinforced_list = phase["reinforced_list"]
+            reinforced_list = phase.get("reinforced_list")
 
             if self.current_phase_idx != self._last_printed_phase:
-                print(f"--- {phase['name']} | Reinforcing List {reinforced_list} ---")
+                print(f"--- {phase.get('name', 'Phase')} | Reinforcing List {reinforced_list} ---")
                 self._last_printed_phase = self.current_phase_idx
                 self._notify_phase_change(self._phase_context(phase))
 
-            # ── Pause check ───────────────────────────────────────────────────
+                lists_to_extract = []
+                if reinforced_list is not None:
+                    lists_to_extract.append(reinforced_list)
+                lists_to_extract.extend(phase.get("extinction_lists", []))
+                phase_words = self.list_manager.vocabulary(lists_to_extract) if lists_to_extract else []
+
+                if self.current_phase_idx == 0:
+                    msg = "Phase 1 is coming next.\n\nThe real test is about to begin.\n\nPlease get ready."
+                else:
+                    between_text = instr_cfg.get("between_phases", "Please wait. Phase {phase} will begin shortly.")
+                    msg = between_text.format(phase=self.current_phase_idx + 1)
+
+                if self.running:
+                    self._show_instruction(msg, phase_words, needs_countdown=True)
+
+            if self._restart_phase:
+                self._restart_phase = False
+                self._apply_phase_restart()
+                continue
+
             self._wait_if_paused()
             if not self.running:
                 break
 
-            # ── Single Cycle ──────────────────────────────────────────────────
             cycle_start = time.perf_counter()
             self.cycle += 1
 
-            # Record
             wav_path, response_time = self._record_response()
 
             if wav_path is None:
-                # No response this cycle
                 self.no_response_streak += 1
                 self.logger.log_no_response(
                     phase=self.phase_number,
@@ -627,9 +557,7 @@ class ExperimentRunner:
                 )
                 print(f"  Cycle {self.cycle:03d} | No response (streak: {self.no_response_streak})")
                 self._update_status(response="-")
-
             else:
-                # Transcribe
                 word, transcript = transcribe(
                     self.model,
                     wav_path,
@@ -640,7 +568,6 @@ class ExperimentRunner:
                 cleanup_audio_file(wav_path)
 
                 if not word:
-                    # ASR returned empty (noise, breath, etc.)
                     self.no_response_streak += 1
                     self.logger.log_trial(
                         phase=self.phase_number,
@@ -692,13 +619,9 @@ class ExperimentRunner:
                     elif reinforced:
                         tag = "[REINFORCED]"
 
-                    print(
-                        f"  Cycle {self.cycle:03d} | '{word}' -> "
-                        f"List {match_result['list']} {tag} | rt={response_time:.2f}s"
-                    )
+                    print(f"  Cycle {self.cycle:03d} | '{word}' -> List {match_result['list']} {tag} | rt={response_time:.2f}s")
                     self._update_status(response=word)
 
-            # ── Inter-Trial Interval ──────────────────────────────────────────
             iti = trial_cfg.get("iti_seconds", 0)
             if iti > 0 and self.running:
                 if self.on_iti:
@@ -712,7 +635,6 @@ class ExperimentRunner:
                 self._apply_phase_restart()
                 continue
 
-            # ── Check Phase Switch ────────────────────────────────────────────
             if self._force_phase_switch:
                 self._force_phase_switch = False
                 switch, reason = True, "Manual override by experimenter"
@@ -727,16 +649,9 @@ class ExperimentRunner:
                 print(f"\n  -> Phase switch: {reason}")
                 self.no_response_streak = 0
                 self.current_phase_idx += 1
-                # Show between-phase instruction if there is a next phase
-                if (between_text
-                        and self.running
-                        and self.current_phase_idx < len(self.cfg["phases"])):
-                    msg = between_text.format(phase=self.current_phase_idx + 1)
-                    self._show_instruction(msg)
 
-        # ── Session End ───────────────────────────────────────────────────────
         self.in_formal_phase = False
-        self.running = False  # ensure flag is cleared after natural completion
+        self.running = False 
         export = self.cfg["data"].get("export_csv", True)
         csv_path = self.logger.close(export_csv=export)
         print(f"\n=== Session complete ===")
@@ -749,10 +664,9 @@ class ExperimentRunner:
 
         end_text = instr_cfg.get("end", "")
         if end_text:
-            self._show_instruction(end_text)
+            self._show_instruction(end_text, [], needs_countdown=False)
 
     def _update_status(self, response: str):
-        """Send status update to GUI if callback is set."""
         if self.on_status:
             reinforced_list = self.current_phase.get("reinforced_list")
             remaining = (
@@ -765,9 +679,6 @@ class ExperimentRunner:
                 last_response=response,
                 remaining=remaining,
             )
-
-
-# ─── Quick Test (no GUI) ──────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     runner = ExperimentRunner("config.yaml")

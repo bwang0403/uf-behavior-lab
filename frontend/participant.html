@@ -221,7 +221,24 @@
     line-height: .95;
   }
 
-  #instruction-text,
+  #instruction-text {
+    margin-top: 24px;
+    color: #2f4238;
+    font-size: clamp(24px, 3vw, 34px);
+    line-height: 1.5;
+    white-space: pre-line;
+  }
+  
+  /* Dedicated zone for flashing words and countdowns */
+  #flash-zone {
+    display: none;
+    margin-top: 24px;
+    min-height: 200px;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+  }
+
   #pause-text {
     margin-top: 24px;
     color: #2f4238;
@@ -249,13 +266,13 @@
     transform: translateY(-2px);
   }
 
-  /* Word Flash Animation */
   .flash-word {
     font-size: clamp(60px, 8vw, 120px);
     font-weight: bold;
     color: var(--blue);
     text-transform: uppercase;
-    animation: fadeInOut 2s ease-in-out;
+    /* Exactly 2 seconds animation */
+    animation: fadeInOut 2s ease-in-out forwards;
   }
 
   @keyframes fadeInOut {
@@ -297,7 +314,8 @@
   <div class="overlay-card">
     <h2 id="overlay-title">Instructions</h2>
     <div id="instruction-text"></div>
-    <button id="participant-start-btn">Start Task</button>
+    <div id="flash-zone"></div>
+    <button id="participant-start-btn">Continue</button>
   </div>
 </div>
 
@@ -318,6 +336,7 @@ const subPrompt = document.getElementById('sub-prompt');
 const instrOverlay = document.getElementById('instruction-overlay');
 const overlayTitle = document.getElementById('overlay-title');
 const instrText = document.getElementById('instruction-text');
+const flashZone = document.getElementById('flash-zone');
 const pauseOverlay = document.getElementById('pause-overlay');
 const startBtn = document.getElementById('participant-start-btn');
 
@@ -326,19 +345,11 @@ let timeLeft = 0;
 let timerId = null;
 let lastSeq = 0;
 
-// --- Frontend Phase Tracking Logic ---
-let expConfig = null;
-let phaseCounter = 0; // Tracks which regular Phase we are about to enter (0 = Phase 1)
+// Backend Data states
+let currentFlashWords = [];
+let currentNeedsCountdown = false;
+let abortFlash = false; // Flag to forcefully stop animation if experimenter overrides
 
-async function loadConfig() {
-  try {
-    const r = await fetch('/config');
-    expConfig = await r.json();
-  } catch(err) { console.error(err); }
-}
-loadConfig();
-
-// Fisher-Yates Shuffle
 function shuffle(array) {
   let arr = [...array];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -346,25 +357,6 @@ function shuffle(array) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
-}
-
-// Get words securely by phase index
-function getWordsForPhase(idx) {
-  if (!expConfig || !expConfig.phases || !expConfig.phases[idx]) return [];
-  let words = [];
-  const phaseCfg = expConfig.phases[idx];
-  const rList = phaseCfg.reinforced_list;
-  const eLists = phaseCfg.extinction_lists || [];
-
-  if (rList && expConfig.word_lists[rList]) {
-    words.push(...expConfig.word_lists[rList]);
-  }
-  for (const el of eLists) {
-    if (expConfig.word_lists[el]) {
-      words.push(...expConfig.word_lists[el]);
-    }
-  }
-  return [...new Set(words)]; // Return unique words
 }
 
 function setState(state, label, main, sub) {
@@ -404,26 +396,32 @@ function stopCycle() {
 }
 
 function runCountdown() {
+  if (abortFlash) return;
   overlayTitle.textContent = "Get Ready";
   let count = 3;
-  instrText.innerHTML = `<div style="font-size: 30px; margin-bottom: 20px;">The phase is starting in</div><div style="font-size: 100px; font-weight: bold; color: var(--green);">${count}</div>`;
+  flashZone.innerHTML = `<div style="font-size: 30px; margin-bottom: 20px;">The recording window opens in</div><div style="font-size: 100px; font-weight: bold; color: var(--green);">${count}</div>`;
   
   let cd = setInterval(() => {
+    if (abortFlash) {
+      clearInterval(cd);
+      return;
+    }
     count--;
     if (count > 0) {
-      instrText.innerHTML = `<div style="font-size: 30px; margin-bottom: 20px;">The phase is starting in</div><div style="font-size: 100px; font-weight: bold; color: var(--green);">${count}</div>`;
+      flashZone.innerHTML = `<div style="font-size: 30px; margin-bottom: 20px;">The recording window opens in</div><div style="font-size: 100px; font-weight: bold; color: var(--green);">${count}</div>`;
     } else {
       clearInterval(cd);
       instrOverlay.classList.remove('show');
       setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
+      // Notify backend the participant is ready!
       fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
     }
   }, 1000);
 }
 
 function flashWordsOneByOne(words, callback) {
-  if (!words || words.length === 0) {
-    callback();
+  if (!words || words.length === 0 || abortFlash) {
+    if (!abortFlash) callback();
     return;
   }
   
@@ -431,13 +429,22 @@ function flashWordsOneByOne(words, callback) {
   let i = 0;
   
   function showNext() {
+    if (abortFlash) return; // Prevent next word if experimenter overrides
+    
     if (i >= words.length) {
       callback();
       return;
     }
-    instrText.innerHTML = `<div class="flash-word">${words[i]}</div>`;
-    i++;
-    setTimeout(showNext, 2000);
+    
+    // Clear flash zone cleanly
+    flashZone.innerHTML = `<div class="flash-word" id="active-flash">${words[i]}</div>`;
+    const flashEl = document.getElementById('active-flash');
+    
+    // STRICT SYNC: Wait for the CSS animation to 100% finish, then move to next
+    flashEl.addEventListener('animationend', () => {
+      i++;
+      showNext();
+    }, { once: true });
   }
   
   showNext();
@@ -445,33 +452,24 @@ function flashWordsOneByOne(words, callback) {
 
 startBtn.addEventListener('click', () => {
   startBtn.style.display = 'none';
-  const currentText = instrText.textContent || "";
-  let wordsToShow = [];
-  
-  // 1. Welcome Screen or End Screen -> Skip directly, no countdown
-  if (currentText.includes('Welcome') || currentText.includes('complete')) {
+
+  // 1. If backend says NO countdown needed (Intro / Outro)
+  if (!currentNeedsCountdown) {
     instrOverlay.classList.remove('show');
     setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
     fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
     return;
   }
 
-  // 2. Practice Round
-  if (currentText.includes('Practice')) {
-    wordsToShow = expConfig.practice_list || [];
-  } 
-  // 3. Regular Phases (Phase 1, 2, 3...)
-  else if (currentText.includes('ready') || currentText.includes('next')) {
-    wordsToShow = getWordsForPhase(phaseCounter);
-    phaseCounter++; // Advance the counter so NEXT time it flashes the NEXT phase!
-  }
+  // 2. If backend says YES countdown needed, hide text, start sequence
+  instrText.style.display = 'none';
+  flashZone.style.display = 'flex';
 
-  // If we have words, shuffle and flash them
-  if (wordsToShow.length > 0) {
-    wordsToShow = shuffle(wordsToShow); // Shuffle to make it random!
-    instrText.innerHTML = `<div style="font-size: 26px; color: var(--muted); margin-bottom: 10px;">Please read the following words carefully.</div>`;
+  if (currentFlashWords && currentFlashWords.length > 0) {
+    let shuffled = shuffle(currentFlashWords);
+    flashZone.innerHTML = `<div style="font-size: 26px; color: var(--muted); margin-bottom: 10px;">Please read the following words carefully.</div>`;
     setTimeout(() => {
-      flashWordsOneByOne(wordsToShow, runCountdown);
+      flashWordsOneByOne(shuffled, runCountdown);
     }, 1500);
   } else {
     runCountdown();
@@ -481,10 +479,14 @@ startBtn.addEventListener('click', () => {
 function handleEvent(event, data) {
   switch(event) {
     case 'session_started':
-      phaseCounter = 0; // ALWAYS Reset to Phase 1 (index 0) when a new experiment starts
       setState('wait', 'Get ready', 'Session starting.', 'Wait for the instruction screen or the countdown timer.');
       break;
     case 'cycle_start':
+      // SUPER IMPORTANT: If backend forces start, abort any running flashes/countdowns!
+      abortFlash = true; 
+      instrOverlay.classList.remove('show');
+      flashZone.innerHTML = '';
+      
       startCycle(data.window_seconds);
       break;
     case 'cycle_end':
@@ -494,13 +496,24 @@ function handleEvent(event, data) {
       if (data.active) setState('wait', 'Please wait', 'Next trial soon.', 'Do not speak during this pause.');
       break;
     case 'instruction':
+      abortFlash = false; // Reset abort flag
       clearInterval(timerId);
       renderArc(0);
       timeDisplay.textContent = '--';
+      
+      currentFlashWords = data.words || [];
+      currentNeedsCountdown = !!data.needs_countdown;
+      
       overlayTitle.textContent = "Instructions";
       instrText.textContent = (data.text || '').trim();
+      instrText.style.display = 'block';
+      flashZone.style.display = 'none';
+      flashZone.innerHTML = '';
+      
+      startBtn.textContent = currentNeedsCountdown ? "Start" : "Continue";
       startBtn.style.display = 'inline-block'; 
       instrOverlay.classList.add('show');
+      
       setState('wait', 'Instructions', 'Read the screen.', 'Click the button below when you are ready to begin.');
       break;
     case 'instruction_done':

@@ -37,30 +37,6 @@ def get_config():
     with open(BASE_DIR / "config.yaml", "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
         
-    # Helper: read words from txt files
-    def read_list(filepath):
-        p = BASE_DIR / filepath
-        if p.exists():
-            with open(p, "r", encoding="utf-8") as lf:
-                return [line.strip() for line in lf if line.strip()]
-        return []
-
-    # Parse and load all word lists based on config
-    list_cfg = cfg.get("lists", {})
-    list_path = list_cfg.get("path", "")
-    
-    word_lists = {}
-    for key, filename in list_cfg.items():
-        if key.startswith("list") and key != "path":
-            num = int(key.replace("list", ""))
-            full_p = os.path.join(list_path, filename)
-            word_lists[num] = read_list(full_p)
-
-    practice_list = []
-    prac_file = cfg.get("practice", {}).get("list")
-    if prac_file:
-        practice_list = read_list(prac_file)
-
     return jsonify({
         "participant_id": cfg["experiment"]["participant_id"],
         "group":          cfg["experiment"]["group"],
@@ -68,9 +44,6 @@ def get_config():
         "practice_enabled": cfg.get("practice", {}).get("enabled", False),
         "asr_provider":   cfg.get("asr", {}).get("provider", "local"),
         "model_ready":    _model_ready,
-        "phases":         cfg.get("phases", []),
-        "word_lists":     word_lists,
-        "practice_list":  practice_list
     })
 
 @app.route("/poll")
@@ -113,7 +86,7 @@ def cmd(action):
         })
         _runner.on_iti         = lambda active: _push("iti_change",   {"active": active})
         _runner.on_pause       = lambda paused: _push("pause_change", {"paused": paused})
-        _runner.on_instruction = lambda text:   _push("instruction",  {"text": text})
+        _runner.on_instruction = lambda text, words, cdown: _push("instruction", {"text": text, "words": words, "needs_countdown": cdown})
         _runner.on_complete    = lambda s:      _push("session_complete", {"summary": s})
         _runner.on_cycle_start = lambda secs:   _push("cycle_start", {"window_seconds": secs})
         _runner.on_cycle_end   = lambda:        _push("cycle_end")

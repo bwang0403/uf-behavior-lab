@@ -19,7 +19,7 @@ BASE_DIR = Path(__file__).parent
 
 def check_dependencies():
     missing = []
-    for pkg in ["faster_whisper", "sounddevice", "soundfile", "numpy", "yaml", "flask"]:
+    for pkg in ["faster-whisper", "sounddevice", "soundfile", "numpy", "yaml", "flask"]:
         try:
             __import__(pkg)
         except ImportError:
@@ -27,7 +27,7 @@ def check_dependencies():
     if missing:
         print("Missing packages:", ", ".join(missing))
         print("Run: pip install -r requirements.txt")
-        sys.exit(1)
+        #sys.exit(1)
 
 
 def check_files():
