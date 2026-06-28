@@ -36,7 +36,6 @@ def participant():
 def get_config():
     with open(BASE_DIR / "config.yaml", "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-        
     return jsonify({
         "participant_id": cfg["experiment"]["participant_id"],
         "group":          cfg["experiment"]["group"],
@@ -64,23 +63,21 @@ def participant_continue():
 @app.route("/cmd/<action>", methods=["POST"])
 def cmd(action):
     global _runner
-
     if action == "start":
         if not _model_ready:
-            return jsonify({"error": "ASR is not ready — check the terminal/configuration."}), 503
+            return jsonify({"error": "ASR is not ready"}), 503
         if _runner is not None and _runner.running:
             return jsonify({"error": "Session already running."}), 409
-
         payload = request.get_json(silent=True) or {}
         practice_enabled = payload.get("practice_enabled")
-
+        
         from trial_loop import ExperimentRunner
         _runner = ExperimentRunner(
             "config.yaml",
             model=_model,
             practice_enabled=practice_enabled,
         )
-
+        
         _runner.on_status = lambda phase, cycle, last_response, remaining: _push("status_update", {
             "phase": phase, "cycle": cycle, "last_response": last_response, "remaining": remaining,
         })
@@ -92,16 +89,15 @@ def cmd(action):
         _runner.on_cycle_end   = lambda:        _push("cycle_end")
         _runner.on_reinforcement = lambda info: _push("reinforcement", info)
         _runner.on_phase_change = lambda info:  _push("phase_change", info)
+        _runner.on_feedback    = lambda correct: _push("feedback", {"correct": correct})
 
         def _run():
             global _runner
-            print("[runner] started")
             try:
                 _runner.run()
-                print("[runner] finished normally")
             except Exception:
                 traceback.print_exc()
-                _push("server_error", {"message": "Experiment crashed — see terminal."})
+                _push("server_error", {"message": "Experiment crashed"})
             finally:
                 if _runner is not None:
                     _runner.running = False
@@ -171,21 +167,16 @@ def _preload_model():
         if provider in {"openai", "api", "cloud"}:
             if not os.environ.get("OPENAI_API_KEY"):
                 _model_ready = False
-                msg = "OPENAI_API_KEY is not set; hosted ASR is not ready."
-                print(f"  {msg}")
-                _push("model_status", {"ready": False, "provider": provider, "message": msg})
+                _push("model_status", {"ready": False, "provider": provider, "message": "API key missing"})
                 return
             try:
                 import openai
             except ImportError:
                 _model_ready = False
-                msg = "The openai package is not installed; run pip install -r requirements.txt."
-                print(f"  {msg}")
-                _push("model_status", {"ready": False, "provider": provider, "message": msg})
+                _push("model_status", {"ready": False, "provider": provider, "message": "openai missing"})
                 return
             _model = None
             _model_ready = True
-            print(f"  Hosted ASR ready ({provider}).")
             _push("model_status", {
                 "ready": True,
                 "provider": provider,
@@ -196,7 +187,6 @@ def _preload_model():
         from faster_whisper import WhisperModel
         _model = WhisperModel(asr_cfg["model_size"], device="cpu")
         _model_ready = True
-        print("  Local Whisper model ready.")
         _push("model_status", {
             "ready": True,
             "provider": provider,
@@ -207,7 +197,4 @@ def _preload_model():
 
 def start(host="127.0.0.1", port=5000):
     threading.Thread(target=_preload_model, daemon=True).start()
-    print(f"\n  Experimenter panel : http://{host}:{port}/")
-    print(f"  Participant screen : http://{host}:{port}/participant")
-    print("  Press Ctrl+C to quit.\n")
     app.run(host=host, port=port, debug=False, threaded=True)

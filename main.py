@@ -82,7 +82,7 @@ if __name__ == "__main__":
     print(f"\n  Participant : {pid}")
     print(f"  Group       : {group}-list")
     print(f"  Window      : {cfg['trial']['window_seconds']}s")
-    print(f"  Streak limit: {cfg['switching']['no_response_streak']} cycles")
+    print(f"  Switch rules: >= {cfg['switching']['min_correct']} correct AND {int(cfg['switching']['accuracy_threshold']*100)}% win rate in last {cfg['switching']['window_size']} trials.")
     print()
 
     confirm = input("Start server? (y/n): ").strip().lower()

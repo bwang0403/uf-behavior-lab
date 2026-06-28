@@ -9,12 +9,9 @@
     --bg: #07120f;
     --panel: #f7efe0;
     --ink: #10231d;
-    --muted: #6f7b72;
     --blue: #2d6cdf;
     --green: #0f9f6e;
     --amber: #d89018;
-    --red: #c94a32;
-    --ring: 1319;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -44,6 +41,19 @@
     pointer-events: none;
   }
 
+  #score-board {
+    position: absolute;
+    top: 30px;
+    right: 40px;
+    font-size: 28px;
+    font-weight: bold;
+    color: var(--green);
+    z-index: 5;
+    background: rgba(15, 159, 110, 0.1);
+    padding: 10px 20px;
+    border-radius: 999px;
+  }
+
   .shell {
     position: relative;
     width: min(1120px, 92vw);
@@ -65,72 +75,17 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-  }
-
-  #mode-label {
-    display: inline-flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    border-radius: 999px;
-    background: rgba(16, 35, 29, .08);
-    color: var(--muted);
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: .18em;
-    text-transform: uppercase;
-    align-self: flex-start;
-  }
-
-  #mode-label::before {
-    content: "";
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: currentColor;
+    text-align: center;
   }
 
   h1 {
-    margin-top: 28px;
     font-family: Georgia, "Times New Roman", serif;
-    font-size: clamp(52px, 7vw, 96px);
-    line-height: .92;
-    letter-spacing: -.06em;
-  }
-
-  #sub-prompt {
-    margin-top: 24px;
-    max-width: 580px;
-    color: #425148;
-    font-size: clamp(22px, 2.4vw, 31px);
-    line-height: 1.32;
-  }
-
-  .rule-strip {
-    margin-top: auto;
-    padding-top: 42px;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-  }
-
-  .rule {
-    min-height: 78px;
-    border-radius: 18px;
-    padding: 16px;
-    background: #eadfc9;
-    color: #314139;
-    font-size: 16px;
-    line-height: 1.25;
-  }
-
-  .rule b {
-    display: block;
-    margin-bottom: 5px;
-    color: #10231d;
-    font-size: 12px;
-    letter-spacing: .12em;
-    text-transform: uppercase;
+    font-size: clamp(70px, 8vw, 110px);
+    line-height: 1;
+    letter-spacing: -.04em;
+    color: var(--green);
+    transition: opacity 0.2s;
   }
 
   .timer-card {
@@ -165,25 +120,12 @@
     box-shadow: inset 0 0 0 1px rgba(16, 35, 29, .08);
   }
 
-  #time-display, #sec-label {
+  #time-display {
     display: none !important;
   }
 
-  body[data-state="speak"] #sub-prompt,
-  body[data-state="speak"] .rule-strip,
-  body[data-state="processing"] #sub-prompt,
-  body[data-state="processing"] .rule-strip,
-  body[data-state="wait"] #sub-prompt,
-  body[data-state="wait"] .rule-strip {
-    display: none !important;
-  }
-
-  body[data-state="speak"] #mode-label { color: var(--green); background: rgba(15, 159, 110, .12); }
-  body[data-state="speak"] #arc { stroke: #ffffff; }
   body[data-state="speak"] .prompt-card { animation: lift .42s ease both; }
-  body[data-state="wait"] #mode-label,
-  body[data-state="processing"] #mode-label { color: var(--amber); background: rgba(216, 144, 24, .14); }
-  body[data-state="paused"] #mode-label { color: var(--red); background: rgba(201, 74, 50, .14); }
+  body[data-state="idle"] h1 { opacity: 0; }
 
   @keyframes lift {
     from { transform: translateY(14px); opacity: .9; }
@@ -224,12 +166,11 @@
   #instruction-text {
     margin-top: 24px;
     color: #2f4238;
-    font-size: clamp(24px, 3vw, 34px);
+    font-size: clamp(28px, 4vw, 42px);
     line-height: 1.5;
     white-space: pre-line;
   }
   
-  /* Dedicated zone for flashing words and countdowns */
   #flash-zone {
     display: none;
     margin-top: 24px;
@@ -239,18 +180,10 @@
     flex-direction: column;
   }
 
-  #pause-text {
-    margin-top: 24px;
-    color: #2f4238;
-    font-size: clamp(24px, 3vw, 34px);
-    line-height: 1.5;
-    white-space: pre-line;
-  }
-
   #participant-start-btn {
     margin-top: 40px;
     padding: 16px 48px;
-    font-size: 22px;
+    font-size: 26px;
     font-weight: bold;
     color: #fff;
     background-color: var(--green);
@@ -271,8 +204,7 @@
     font-weight: bold;
     color: var(--blue);
     text-transform: uppercase;
-    /* Exactly 2 seconds animation */
-    animation: fadeInOut 2s ease-in-out forwards;
+    animation: fadeInOut 1s ease-in-out forwards;
   }
 
   @keyframes fadeInOut {
@@ -281,19 +213,37 @@
     85% { opacity: 1; transform: scale(1); }
     100% { opacity: 0; transform: scale(1.05); }
   }
+
+  #feedback-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+  }
+
+  .fb-correct {
+    background: rgba(7, 18, 15, 0.95);
+    color: #0f9f6e;
+    font-size: clamp(80px, 12vw, 150px);
+    font-weight: bold;
+    font-family: Georgia, "Times New Roman", serif;
+  }
+
+  .fb-incorrect {
+    background: #000000;
+  }
 </style>
 </head>
 <body data-state="idle">
+
+<div id="score-board">Points: <span id="score-value">0</span></div>
+
 <main class="shell" aria-live="polite">
   <section class="prompt-card">
-    <div id="mode-label">Waiting</div>
-    <h1 id="main-prompt">Wait for the timer.</h1>
-    <p id="sub-prompt">Speak only when the countdown is visible and the screen says "Speak now."</p>
-    <div class="rule-strip">
-      <div class="rule"><b>When to speak</b>During the 3-second timer.</div>
-      <div class="rule"><b>What to say</b>One clear English word.</div>
-      <div class="rule"><b>When to wait</b>When the screen says please wait.</div>
-    </div>
+    <h1 id="main-prompt"></h1>
   </section>
 
   <section class="timer-card" aria-label="response timer">
@@ -303,10 +253,7 @@
               stroke-dasharray="1319" stroke-dashoffset="1319" stroke-linecap="round"
               transform="rotate(-90 260 260)"/>
     </svg>
-    <div class="time-cluster">
-      <div id="time-display">--</div>
-      <div id="sec-label">seconds</div>
-    </div>
+    <div class="time-cluster"></div>
   </section>
 </main>
 
@@ -319,36 +266,29 @@
   </div>
 </div>
 
-<div id="pause-overlay" class="overlay">
-  <div class="overlay-card">
-    <h2>Paused</h2>
-    <div id="pause-text">Please wait. The experimenter will resume the session.</div>
-  </div>
-</div>
+<div id="feedback-screen"></div>
 
 <script>
 const CIRC = 2 * Math.PI * 210;
 const arc = document.getElementById('arc');
-const timeDisplay = document.getElementById('time-display');
-const modeLabel = document.getElementById('mode-label');
 const mainPrompt = document.getElementById('main-prompt');
-const subPrompt = document.getElementById('sub-prompt');
 const instrOverlay = document.getElementById('instruction-overlay');
 const overlayTitle = document.getElementById('overlay-title');
 const instrText = document.getElementById('instruction-text');
 const flashZone = document.getElementById('flash-zone');
-const pauseOverlay = document.getElementById('pause-overlay');
 const startBtn = document.getElementById('participant-start-btn');
+const feedbackScreen = document.getElementById('feedback-screen');
+const scoreValue = document.getElementById('score-value');
 
 let windowSeconds = 3;
 let timeLeft = 0;
 let timerId = null;
 let lastSeq = 0;
+let score = 0;
 
-// Backend Data states
 let currentFlashWords = [];
 let currentNeedsCountdown = false;
-let abortFlash = false; // Flag to forcefully stop animation if experimenter overrides
+let abortFlash = false;
 
 function shuffle(array) {
   let arr = [...array];
@@ -359,11 +299,9 @@ function shuffle(array) {
   return arr;
 }
 
-function setState(state, label, main, sub) {
+function setState(state, promptText) {
   document.body.dataset.state = state;
-  modeLabel.textContent = label;
-  mainPrompt.textContent = main;
-  subPrompt.textContent = sub;
+  mainPrompt.textContent = promptText || '';
 }
 
 function renderArc(ratio) {
@@ -374,15 +312,10 @@ function startCycle(secs) {
   windowSeconds = secs || 3;
   timeLeft = windowSeconds;
   clearInterval(timerId);
-  
-  setState('speak', 'Speak now', 'Say one word.', 'Speak clearly, then stop and wait for the next timer.');
-  
-  timeDisplay.textContent = timeLeft.toFixed(1);
+  setState('speak', 'Speak now');
   renderArc(1);
-
   timerId = setInterval(() => {
     timeLeft = Math.max(0, timeLeft - 0.1);
-    timeDisplay.textContent = timeLeft.toFixed(1);
     renderArc(timeLeft / windowSeconds);
     if (timeLeft <= 0) clearInterval(timerId);
   }, 100);
@@ -391,32 +324,7 @@ function startCycle(secs) {
 function stopCycle() {
   clearInterval(timerId);
   renderArc(0);
-  timeDisplay.textContent = '--';
-  setState('processing', 'Please wait', 'Response recorded.', 'Do not speak now. The next timer will start soon.');
-}
-
-function runCountdown() {
-  if (abortFlash) return;
-  overlayTitle.textContent = "Get Ready";
-  let count = 3;
-  flashZone.innerHTML = `<div style="font-size: 30px; margin-bottom: 20px;">The recording window opens in</div><div style="font-size: 100px; font-weight: bold; color: var(--green);">${count}</div>`;
-  
-  let cd = setInterval(() => {
-    if (abortFlash) {
-      clearInterval(cd);
-      return;
-    }
-    count--;
-    if (count > 0) {
-      flashZone.innerHTML = `<div style="font-size: 30px; margin-bottom: 20px;">The recording window opens in</div><div style="font-size: 100px; font-weight: bold; color: var(--green);">${count}</div>`;
-    } else {
-      clearInterval(cd);
-      instrOverlay.classList.remove('show');
-      setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
-      // Notify backend the participant is ready!
-      fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
-    }
-  }, 1000);
+  setState('idle', '');
 }
 
 function flashWordsOneByOne(words, callback) {
@@ -424,97 +332,105 @@ function flashWordsOneByOne(words, callback) {
     if (!abortFlash) callback();
     return;
   }
-  
-  overlayTitle.textContent = "Word List";
+  overlayTitle.style.display = 'none';
   let i = 0;
-  
   function showNext() {
-    if (abortFlash) return; // Prevent next word if experimenter overrides
-    
+    if (abortFlash) return;
     if (i >= words.length) {
       callback();
       return;
     }
-    
-    // Clear flash zone cleanly
     flashZone.innerHTML = `<div class="flash-word" id="active-flash">${words[i]}</div>`;
     const flashEl = document.getElementById('active-flash');
-    
-    // STRICT SYNC: Wait for the CSS animation to 100% finish, then move to next
     flashEl.addEventListener('animationend', () => {
       i++;
       showNext();
     }, { once: true });
   }
-  
   showNext();
 }
 
 startBtn.addEventListener('click', () => {
   startBtn.style.display = 'none';
-
-  // 1. If backend says NO countdown needed (Intro / Outro)
   if (!currentNeedsCountdown) {
     instrOverlay.classList.remove('show');
-    setState('wait', 'Please wait', 'Get ready.', 'Speak only when the countdown appears.');
+    setState('idle', '');
     fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
     return;
   }
-
-  // 2. If backend says YES countdown needed, hide text, start sequence
+  
   instrText.style.display = 'none';
   flashZone.style.display = 'flex';
-
+  
   if (currentFlashWords && currentFlashWords.length > 0) {
     let shuffled = shuffle(currentFlashWords);
-    flashZone.innerHTML = `<div style="font-size: 26px; color: var(--muted); margin-bottom: 10px;">Please read the following words carefully.</div>`;
-    setTimeout(() => {
-      flashWordsOneByOne(shuffled, runCountdown);
-    }, 1500);
+    flashWordsOneByOne(shuffled, () => {
+      instrOverlay.classList.remove('show');
+      setState('idle', '');
+      fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
+    });
   } else {
-    runCountdown();
+    instrOverlay.classList.remove('show');
+    setState('idle', '');
+    fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
   }
 });
 
 function handleEvent(event, data) {
   switch(event) {
     case 'session_started':
-      setState('wait', 'Get ready', 'Session starting.', 'Wait for the instruction screen or the countdown timer.');
+      score = 0;
+      scoreValue.textContent = score;
+      setState('idle', '');
       break;
     case 'cycle_start':
-      // SUPER IMPORTANT: If backend forces start, abort any running flashes/countdowns!
       abortFlash = true; 
       instrOverlay.classList.remove('show');
       flashZone.innerHTML = '';
-      
       startCycle(data.window_seconds);
       break;
     case 'cycle_end':
       stopCycle();
       break;
     case 'iti_change':
-      if (data.active) setState('wait', 'Please wait', 'Next trial soon.', 'Do not speak during this pause.');
+      if (data.active) setState('idle', '');
+      break;
+    case 'feedback':
+      if (data.correct) {
+        score++;
+        scoreValue.textContent = score;
+        feedbackScreen.className = 'fb-correct';
+        feedbackScreen.innerHTML = '<div>⭐</div><div>Correct</div>';
+      } else {
+        feedbackScreen.className = 'fb-incorrect';
+        feedbackScreen.innerHTML = '';
+      }
+      feedbackScreen.style.display = 'flex';
+      setTimeout(() => {
+        feedbackScreen.style.display = 'none';
+      }, 400);
       break;
     case 'instruction':
-      abortFlash = false; // Reset abort flag
+      abortFlash = false;
       clearInterval(timerId);
       renderArc(0);
-      timeDisplay.textContent = '--';
-      
       currentFlashWords = data.words || [];
       currentNeedsCountdown = !!data.needs_countdown;
-      
       overlayTitle.textContent = "Instructions";
+      overlayTitle.style.display = 'block';
       instrText.textContent = (data.text || '').trim();
       instrText.style.display = 'block';
       flashZone.style.display = 'none';
       flashZone.innerHTML = '';
-      
       startBtn.textContent = currentNeedsCountdown ? "Start" : "Continue";
       startBtn.style.display = 'inline-block'; 
       instrOverlay.classList.add('show');
-      
-      setState('wait', 'Instructions', 'Read the screen.', 'Click the button below when you are ready to begin.');
+      setState('idle', '');
+      if (!data.text || data.text.trim() === '') {
+          overlayTitle.style.display = 'none';
+          instrText.style.display = 'none';
+          startBtn.click();
+      }
       break;
     case 'instruction_done':
       instrOverlay.classList.remove('show');
@@ -522,21 +438,14 @@ function handleEvent(event, data) {
     case 'pause_change':
       if (data.paused) {
         clearInterval(timerId);
-        pauseOverlay.classList.add('show');
-        setState('paused', 'Paused', 'Please wait.', 'The experimenter has paused the session.');
-      } else {
-        pauseOverlay.classList.remove('show');
-        setState('wait', 'Please wait', 'Resuming.', 'Speak only when the countdown appears.');
+        setState('idle', '');
       }
       break;
     case 'session_complete':
     case 'session_ended':
-      stopCycle();
-      setState('wait', 'Complete', 'Session complete.', 'Please wait for the experimenter.');
-      break;
     case 'session_stopped':
       stopCycle();
-      setState('wait', 'Stopped', 'Session stopped.', 'Please wait for the experimenter.');
+      setState('idle', '');
       break;
   }
 }
@@ -553,7 +462,7 @@ async function poll() {
   setTimeout(poll, 200);
 }
 
-setState('idle', 'Waiting', 'Wait for the timer.', 'Speak only when the countdown is visible and the screen says "Speak now."');
+setState('idle', '');
 renderArc(0);
 poll();
 </script>

@@ -1,86 +1,74 @@
-# ─── Experiment Design ────────────────────────────────────────────────────────
 experiment:
-  group: 2                    # 2 = two-list group, 3 = three-list group
-  participant_id: "P001"      # update before each session
+  group: 2
+  participant_id: "P001"
 
-# ─── Phase Settings ───────────────────────────────────────────────────────────
 phases:
   - name: "Phase 1"
-    reinforced_list: 1        # which list earns reinforcement
+    reinforced_list: 1
     extinction_lists: []
 
   - name: "Phase 2"
     reinforced_list: 2
     extinction_lists: [1]
 
-  - name: "Phase 3"           # full extinction
+  - name: "Phase 3"
     reinforced_list: null
     extinction_lists: [1, 2, 3]
 
-# ─── Phase Switching Criteria ─────────────────────────────────────────────────
 switching:
-  no_response_streak: 5       # switch phase after X consecutive cycles with no response
+  min_correct: 15
+  window_size: 10
+  accuracy_threshold: 0.8
+  max_trials: 100
 
-# ─── Trial / Cycle Settings ───────────────────────────────────────────────────
 trial:
-  window_seconds: 3.0         # max duration of each response window
-  min_response_gap: 0.3       # seconds of silence before cutting off recording
-  iti_seconds: 0.5            # inter-trial interval between cycles (seconds); 0 = no gap
+  window_seconds: 3.0
+  min_response_gap: 0.3
+  iti_seconds: 0.5
 
-# ─── Lists ────────────────────────────────────────────────────────────────────
 lists:
   path: "list/"
   list1: "list1_animals.txt"
   list2: "list2_professions.txt"
-  list3: "list3_household.txt"  # only used in 3-list group
+  list3: "list3_foods.txt"
 
-# ─── Audio ────────────────────────────────────────────────────────────────────
 audio:
   reinforcement_sound: "audio/reward.wav"
   sample_rate: 16000
   channels: 1
 
-# ─── ASR ──────────────────────────────────────────────────────────────────────
 asr:
-  provider: "local"          # local = faster-whisper; openai = hosted API via OPENAI_API_KEY
-  model_size: "base"          # base = fast on CPU; try "small" if accuracy is poor
-  beam_size: 5                # higher beam search improves local accuracy at some speed cost
+  provider: "local"
+  model_size: "base"
+  beam_size: 5
   openai_model: "gpt-4o-transcribe"
   prefer_vocabulary_matches: true
   language: "en"
 
-# ─── Practice Round ───────────────────────────────────────────────────────────
 practice:
   enabled: true
-  list: "list/list_practice.txt"   # small word list; not counted in experiment data
-  no_response_streak: 3            # end practice after 3 consecutive no-responses
+  list: "list/list_practice.txt"
+  max_trials: 20
   instruction: |
-    Practice round.
+    Practice Round.
+    
+    Say the word shown on the screen.
 
-    Say any word from the practice list.
-    You will hear a chime for correct answers.
-
-# ─── Instructions ─────────────────────────────────────────────────────────────
 instructions:
   intro: |
-    Welcome to the experiment.
-
-    You will hear a chime when you say
-    the right word.
-
+    Welcome.
+    
     Say one word at a time.
+    You will earn points for correct words.
 
   between_phases: |
     Please get ready.
-
-    The next phase is about to begin.
 
   end: |
     The experiment is complete.
 
     Thank you for your participation!
 
-# ─── Data ─────────────────────────────────────────────────────────────────────
 data:
   db_path: "data/resurgence.db"
   export_csv: true
