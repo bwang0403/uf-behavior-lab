@@ -52,12 +52,10 @@ practice:
   instruction: |
     Practice Round.
     
-    Say the word shown on the screen.
+    Examine each of the words shown next.
 
 instructions:
   intro: |
-    Welcome.
-    
     Say one word at a time.
     You will earn points for correct words.
 

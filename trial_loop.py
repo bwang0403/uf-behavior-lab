@@ -4,6 +4,7 @@ import yaml
 import os
 from pathlib import Path
 import re
+import logging
 
 try:
     from faster_whisper import WhisperModel
@@ -177,25 +178,20 @@ class ExperimentRunner:
         self.current_phase_idx = 0
         self._last_printed_phase = -1
         self.cycle = 0
-        
         self.phase_trial_count = 0
         self.phase_correct_count = 0
         self.phase_rolling_results = []
-        
-        self.phase_attempts = {
-            idx + 1: 1 for idx in range(len(self.cfg.get("phases", [])))
-        }
-        self.on_status      = None
-        self.on_iti         = None   
-        self.on_pause       = None   
+        self.phase_attempts = {idx + 1: 1 for idx in range(len(self.cfg.get("phases", [])))}
+        self.on_status = None
+        self.on_iti = None   
+        self.on_pause = None   
         self.on_instruction = None   
-        self.on_complete    = None   
+        self.on_complete = None   
         self.on_cycle_start = None   
-        self.on_cycle_end   = None   
+        self.on_cycle_end = None   
         self.on_reinforcement = None 
         self.on_phase_change = None  
         self.on_feedback = None
-
         self._pause_event = threading.Event()
         self._pause_event.set()
         self._force_phase_switch = False
@@ -206,7 +202,6 @@ class ExperimentRunner:
         self.in_formal_phase = False
         self._instruction_event = threading.Event()
         self._instruction_event.set()
-
         if model is not None:
             self.model = model
         else:
@@ -218,7 +213,6 @@ class ExperimentRunner:
                 self.model = WhisperModel(asr_cfg["model_size"], device="cpu")
             else:
                 self.model = None
-
         list_cfg = self.cfg["lists"]
         group = self.cfg["experiment"]["group"]
         list_paths = {
@@ -228,7 +222,6 @@ class ExperimentRunner:
         if group == 3:
             list_paths[3] = resolve(os.path.join(list_cfg["path"], list_cfg["list3"]))
         self.list_manager = ListManager(list_paths)
-
         data_cfg = self.cfg["data"]
         exp_cfg = self.cfg["experiment"]
         self.logger = SessionLogger(
@@ -275,10 +268,10 @@ class ExperimentRunner:
     def _wait_if_paused(self):
         self._pause_event.wait()
 
-    def _show_instruction(self, text: str, words_to_flash: list[str] = None, needs_countdown: bool = False):
+    def _show_instruction(self, text: str, words_to_flash: list[str] = None, needs_countdown: bool = False, title: str = "Instructions"):
         if self.on_instruction:
             self._instruction_event.clear()
-            self.on_instruction(text, words_to_flash or [], needs_countdown)
+            self.on_instruction(text, words_to_flash or [], needs_countdown, title)
             self._instruction_event.wait() 
 
     def _record_response(self) -> tuple[str | None, float | None]:
@@ -346,19 +339,17 @@ class ExperimentRunner:
         attempt = self.current_phase_attempt
         self.logger.mark_phase_attempt_discarded(phase=phase_num, phase_attempt=attempt)
         self.phase_attempts[phase_num] = attempt + 1
-        
         self.phase_trial_count = 0
         self.phase_correct_count = 0
         self.phase_rolling_results = []
-        
         self._force_phase_switch = False
         self._last_printed_phase = -1
-
         reinforced_list = self.current_phase.get("reinforced_list")
         if reinforced_list:
             self.list_manager.reset_list(reinforced_list)
         self._notify_phase_change(self._phase_context(self.current_phase))
 
+    
     def _run_practice(self):
         practice_cfg = self.cfg.get("practice", {})
         if not self.running or not practice_cfg.get("enabled", False):
@@ -370,291 +361,192 @@ class ExperimentRunner:
             self.in_practice = False
             return
 
-        trial_cfg = self.cfg["trial"]
         practice_manager = ListManager({99: list_path})
-        prac_instr = practice_cfg.get("instruction", "")
-        
-        practice_attempt = 0
+        practice_words = practice_manager.vocabulary([99])[:2]
+        practice_words_set = set(practice_words)
+
+        practice_attempts_count = 0
         while self.running and not self._skip_practice:
-            practice_attempt += 1
             self._restart_practice = False
+            practice_attempts_count += 1
+            if practice_attempts_count > 1:
+                logging.info(f"Participant {self.cfg['experiment']['participant_id']} restarted practice round. Attempt: {practice_attempts_count}")
+            
             self._notify_phase_change({
-                "mode": "practice",
-                "phase": "practice",
-                "phase_attempt": practice_attempt,
-                "name": "Practice Round",
-                "reinforced_list": "practice",
-                "target": "Practice list earns chime",
+                "mode": "practice", 
+                "phase": "practice", 
+                "phase_attempt": practice_attempts_count, 
+                "name": "Practice Round", 
+                "reinforced_list": "practice", 
+                "target": "Practice list earns chime"
             })
             
-            vocab = practice_manager.vocabulary([99])
-            practice_words = vocab if vocab else []
+            self._show_instruction(
+                "Practice Round. Examine each of the words shown next.", 
+                practice_words, 
+                needs_countdown=True, 
+                title="Practice Round"
+            )
+            
+            if self.running and not self._skip_practice and not self._restart_practice:
+                self._show_instruction(
+                    "You will have 3-second opportunities to say individual words.", 
+                    [], 
+                    needs_countdown=False, 
+                    title=""
+                )
+            
+            words_said = set()
+            opportunities = 0
+            vocab = practice_words
+            
+            while self.running and not self._skip_practice and not self._restart_practice and len(words_said) < len(practice_words):
+                self._wait_if_paused()
+                if not self.running: break
+                
+                self.cycle += 1
+                opportunities += 1
+                wav_path, response_time = self._record_response()
+                reinforced = False
+                
+                if wav_path is not None:
+                    word, transcript = transcribe(
+                        self.model, wav_path, self.cfg["asr"]["language"], 
+                        vocabulary=vocab, asr_cfg=self.cfg.get("asr", {})
+                    )
+                    cleanup_audio_file(wav_path)
+                    if word:
+                        result = practice_manager.match(word, raw_response=transcript)
+                        recognized_word = result["word"]
+                        
+                        if recognized_word in practice_words_set and recognized_word not in words_said:
+                            words_said.add(recognized_word)
+                            reinforced = True
 
-            is_first_word = True
-            for target_word in practice_words:
-                if not self.running or self._skip_practice or self._restart_practice:
+                if self.on_feedback: 
+                    self.on_feedback(reinforced)
+                
+                if reinforced:
+                    play_reinforcement(self.reward_path)
+                    time.sleep(0.4)
+                else:
+                    time.sleep(0.4)
+                
+                if opportunities >= 10 and len(words_said) < len(practice_words):
+                    self._restart_practice = True
                     break
-                
-
-                current_instr = prac_instr if is_first_word else ""
-                self._show_instruction(current_instr, [target_word], needs_countdown=True)
-                is_first_word = False   
-                
-                # Repeat the trial infinitely until they get it correct
-                while self.running and not self._skip_practice and not self._restart_practice:
-                    self._wait_if_paused()
-                    if not self.running:
-                        break
-
-                    self.cycle += 1
-                    wav_path, response_time = self._record_response()
-
-                    word = ""
-                    transcript = ""
-                    reinforced = False
                     
-                    if wav_path is not None:
-                        word, transcript = transcribe(
-                            self.model,
-                            wav_path,
-                            self.cfg["asr"]["language"],
-                            vocabulary=vocab,
-                            asr_cfg=self.cfg.get("asr", {}),
-                        )
-                        cleanup_audio_file(wav_path)
-                        if word:
-                            result = practice_manager.match(word, raw_response=transcript)
-                            # Strictly match the specific word being practiced
-                            reinforced = (result["word"] == target_word)
-                    
-                    if self.on_feedback:
-                        self.on_feedback(reinforced)
-                        
-                    if reinforced:
-                        play_reinforcement(self.reward_path)
-                        if self.on_reinforcement:
-                            self.on_reinforcement({
-                                "phase": "practice",
-                                "cycle": self.cycle,
-                                "word": word,
-                                "matched_list": 99,
-                            })
-                        time.sleep(0.4)
-                        # Answered correctly -> break out of the while loop, move to next practice word
-                        break 
-                    else:
-                        time.sleep(0.4)
-                        
-                    iti = trial_cfg.get("iti_seconds", 0)
-                    if iti > 0 and self.running:
-                        if self.on_iti:
-                            self.on_iti(True)
-                        time.sleep(iti)
-                        if self.on_iti:
-                            self.on_iti(False)
-
-            if not self._restart_practice:
+            if not self._restart_practice: 
                 break
-
+                
         self.in_practice = False
         self._skip_practice = False
         self._restart_practice = False
-
+        
     def run(self):
         self.running = True
         trial_cfg = self.cfg["trial"]
         switch_cfg = self.cfg["switching"]
         instr_cfg = self.cfg.get("instructions", {})
-
         intro_text = instr_cfg.get("intro", "")
         if intro_text:
-            self._show_instruction(intro_text, [], needs_countdown=False)
-
+            self._show_instruction(intro_text, [], needs_countdown=False, title="Instructions")
         if self.running:
             self._run_practice()
-
         self.in_formal_phase = True
-        
         self.phase_trial_count = 0
         self.phase_correct_count = 0
         self.phase_rolling_results = []
-        
         while self.running and self.current_phase_idx < len(self.cfg["phases"]):
             phase = self.current_phase
             reinforced_list = phase.get("reinforced_list")
-
             if self.current_phase_idx != self._last_printed_phase:
                 self._last_printed_phase = self.current_phase_idx
                 self._notify_phase_change(self._phase_context(phase))
-
                 lists_to_extract = []
                 if reinforced_list is not None:
                     lists_to_extract.append(reinforced_list)
                 lists_to_extract.extend(phase.get("extinction_lists", []))
                 phase_words = self.list_manager.vocabulary(lists_to_extract) if lists_to_extract else []
-
                 msg = instr_cfg.get("between_phases", "Please get ready.")
                 if self.running:
-                    self._show_instruction(msg, phase_words, needs_countdown=True)
-
+                    self._show_instruction(msg, phase_words, needs_countdown=True, title="Instructions")
             if self._restart_phase:
                 self._restart_phase = False
                 self._apply_phase_restart()
                 continue
-
             self._wait_if_paused()
-            if not self.running:
-                break
-
+            if not self.running: break
             cycle_start = time.perf_counter()
             self.cycle += 1
             self.phase_trial_count += 1
-
             wav_path, response_time = self._record_response()
-
             word = ""
             transcript = ""
             reinforced = False
-            match_result = {
-                "raw": None,
-                "word": None,
-                "list": None,
-                "novel": False,
-                "repeat": False,
-            }
-
+            match_result = {"raw": None, "word": None, "list": None, "novel": False, "repeat": False}
             if wav_path is None:
-                self.logger.log_no_response(
-                    phase=self.phase_number,
-                    phase_attempt=self.current_phase_attempt,
-                    cycle=self.cycle,
-                    timestamp=cycle_start,
-                )
+                self.logger.log_no_response(phase=self.phase_number, phase_attempt=self.current_phase_attempt, cycle=self.cycle, timestamp=cycle_start)
                 self._update_status(response="-")
             else:
-                word, transcript = transcribe(
-                    self.model,
-                    wav_path,
-                    self.cfg["asr"]["language"],
-                    vocabulary=self._experiment_vocabulary(),
-                    asr_cfg=self.cfg.get("asr", {}),
-                )
+                word, transcript = transcribe(self.model, wav_path, self.cfg["asr"]["language"], vocabulary=self._experiment_vocabulary(), asr_cfg=self.cfg.get("asr", {}))
                 cleanup_audio_file(wav_path)
-
                 if not word:
                     match_result["raw"] = transcript or None
-                    self.logger.log_trial(
-                        phase=self.phase_number,
-                        cycle=self.cycle,
-                        timestamp=cycle_start,
-                        match_result=match_result,
-                        reinforced=False,
-                        response_time=response_time,
-                        phase_attempt=self.current_phase_attempt,
-                    )
+                    self.logger.log_trial(phase=self.phase_number, cycle=self.cycle, timestamp=cycle_start, match_result=match_result, reinforced=False, response_time=response_time, phase_attempt=self.current_phase_attempt)
                     self._update_status(response="?")
                 else:
                     match_result = self.list_manager.match(word, raw_response=transcript)
                     reinforced = should_reinforce(match_result, reinforced_list)
-
-                    self.logger.log_trial(
-                        phase=self.phase_number,
-                        cycle=self.cycle,
-                        timestamp=cycle_start,
-                        match_result=match_result,
-                        reinforced=reinforced,
-                        response_time=response_time,
-                        phase_attempt=self.current_phase_attempt,
-                    )
+                    self.logger.log_trial(phase=self.phase_number, cycle=self.cycle, timestamp=cycle_start, match_result=match_result, reinforced=reinforced, response_time=response_time, phase_attempt=self.current_phase_attempt)
                     self._update_status(response=word)
-
-            if reinforced:
-                self.phase_correct_count += 1
-            
+            if reinforced: self.phase_correct_count += 1
             self.phase_rolling_results.append(reinforced)
             window_size = switch_cfg.get("window_size", 10)
-            if len(self.phase_rolling_results) > window_size:
-                self.phase_rolling_results.pop(0)
-
-            if self.on_feedback:
-                self.on_feedback(reinforced)
-
+            if len(self.phase_rolling_results) > window_size: self.phase_rolling_results.pop(0)
+            if self.on_feedback: self.on_feedback(reinforced)
             if reinforced:
                 play_reinforcement(self.reward_path)
                 if self.on_reinforcement:
-                    self.on_reinforcement({
-                        "phase": self.phase_number,
-                        "cycle": self.cycle,
-                        "word": match_result["word"],
-                        "matched_list": match_result["list"],
-                    })
-
+                    self.on_reinforcement({"phase": self.phase_number, "cycle": self.cycle, "word": match_result["word"], "matched_list": match_result["list"]})
             time.sleep(0.4)
-
             iti = trial_cfg.get("iti_seconds", 0)
             if iti > 0 and self.running:
-                if self.on_iti:
-                    self.on_iti(True)
+                if self.on_iti: self.on_iti(True)
                 time.sleep(iti)
-                if self.on_iti:
-                    self.on_iti(False)
-
+                if self.on_iti: self.on_iti(False)
             if self._restart_phase:
                 self._restart_phase = False
                 self._apply_phase_restart()
                 continue
-
             if self._force_phase_switch:
                 self._force_phase_switch = False
                 switch = True
             else:
-                switch, _ = check_phase_switch(
-                    self.phase_trial_count,
-                    self.phase_correct_count,
-                    self.phase_rolling_results,
-                    switch_cfg.get("max_trials", 100),
-                    reinforced_list is None,
-                    switch_cfg.get("min_correct", 15),
-                    window_size,
-                    switch_cfg.get("accuracy_threshold", 0.8)
-                )
-
+                switch, _ = check_phase_switch(self.phase_trial_count, self.phase_correct_count, self.phase_rolling_results, switch_cfg.get("max_trials", 100), reinforced_list is None, switch_cfg.get("min_correct", 15), window_size, switch_cfg.get("accuracy_threshold", 0.8))
             if switch:
                 self.current_phase_idx += 1
                 self.phase_trial_count = 0
                 self.phase_correct_count = 0
                 self.phase_rolling_results = []
-
         self.in_formal_phase = False
         self.running = False 
         export = self.cfg["data"].get("export_csv", True)
         self.logger.close(export_csv=export)
-
         summary = self.logger.get_summary()
-        if self.on_complete:
-            self.on_complete(summary)
-
+        if self.on_complete: self.on_complete(summary)
         end_text = instr_cfg.get("end", "")
         if end_text:
-            self._show_instruction(end_text, [], needs_countdown=False)
+            self._show_instruction(end_text, [], needs_countdown=False, title="Instructions")
 
     def _update_status(self, response: str):
         if self.on_status:
             reinforced_list = self.current_phase.get("reinforced_list")
-            remaining = (
-                self.list_manager.remaining_count(reinforced_list)
-                if reinforced_list else 0
-            )
-            self.on_status(
-                phase=self.phase_number,
-                cycle=self.cycle,
-                last_response=response,
-                remaining=remaining,
-            )
+            remaining = self.list_manager.remaining_count(reinforced_list) if reinforced_list else 0
+            self.on_status(phase=self.phase_number, cycle=self.cycle, last_response=response, remaining=remaining)
 
 if __name__ == "__main__":
     runner = ExperimentRunner("config.yaml")
-    def print_status(phase, cycle, last_response, remaining):
-        pass
+    def print_status(phase, cycle, last_response, remaining): pass
     runner.on_status = print_status
     runner.run()

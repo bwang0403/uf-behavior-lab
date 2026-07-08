@@ -259,7 +259,7 @@
 
 <div id="instruction-overlay" class="overlay">
   <div class="overlay-card">
-    <h2 id="overlay-title">Instructions</h2>
+    <h2 id="overlay-title"></h2>
     <div id="instruction-text"></div>
     <div id="flash-zone"></div>
     <button id="participant-start-btn">Continue</button>
@@ -383,6 +383,12 @@ function handleEvent(event, data) {
       scoreValue.textContent = score;
       setState('idle', '');
       break;
+    case 'phase_change':
+      if (data.mode === 'experiment' && data.phase === 1) {
+        score = 0;
+        scoreValue.textContent = score;
+      }
+      break;
     case 'cycle_start':
       abortFlash = true; 
       instrOverlay.classList.remove('show');
@@ -416,8 +422,8 @@ function handleEvent(event, data) {
       renderArc(0);
       currentFlashWords = data.words || [];
       currentNeedsCountdown = !!data.needs_countdown;
-      overlayTitle.textContent = "Instructions";
-      overlayTitle.style.display = 'block';
+      overlayTitle.textContent = data.title || "";
+      overlayTitle.style.display = data.title ? 'block' : 'none';
       instrText.textContent = (data.text || '').trim();
       instrText.style.display = 'block';
       flashZone.style.display = 'none';
