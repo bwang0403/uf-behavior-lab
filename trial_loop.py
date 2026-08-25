@@ -349,8 +349,7 @@ class ExperimentRunner:
             self.list_manager.reset_list(reinforced_list)
         self._notify_phase_change(self._phase_context(self.current_phase))
 
-    
-    def _run_practice(self):
+    def _run_practice(self, combined_msg: str):
         practice_cfg = self.cfg.get("practice", {})
         if not self.running or not practice_cfg.get("enabled", False):
             return
@@ -381,21 +380,24 @@ class ExperimentRunner:
                 "target": "Practice list earns chime"
             })
             
+            # Practice Column: Instruction + Words
             self._show_instruction(
-                "Practice Round. Examine each of the words shown next.", 
+                "Examine each of the words shown next.", 
                 practice_words, 
                 needs_countdown=True, 
                 title="Practice Round"
             )
             
+            # Practice Column: Combined Rule Instruction
             if self.running and not self._skip_practice and not self._restart_practice:
                 self._show_instruction(
-                    "You will have 3-second opportunities to say individual words.", 
+                    combined_msg, 
                     [], 
                     needs_countdown=False, 
-                    title=""
+                    title="Instructions"
                 )
             
+            # Practice Column: Speak now test
             words_said = set()
             opportunities = 0
             vocab = practice_words
@@ -442,41 +444,78 @@ class ExperimentRunner:
         self.in_practice = False
         self._skip_practice = False
         self._restart_practice = False
-        
+
     def run(self):
         self.running = True
         trial_cfg = self.cfg["trial"]
         switch_cfg = self.cfg["switching"]
         instr_cfg = self.cfg.get("instructions", {})
-        intro_text = instr_cfg.get("intro", "")
-        if intro_text:
-            self._show_instruction(intro_text, [], needs_countdown=False, title="Instructions")
+        
+        # Hardcoded combined message based strictly on the flowchart
+        combined_msg = (
+            "You will have 3-second opportunities to say individual words.\n\n"
+            "Say one word at a time.\n\n"
+            "You will earn points for correct words."
+        )
+
+        # 1. PRACTICE ROUND (Column 1 of Flowchart)
         if self.running:
-            self._run_practice()
+            self._run_practice(combined_msg)
+
+        # 2. PRESENT ALL MAIN LISTS SEQUENTIALLY (Column 2 of Flowchart)
+        presented_lists = []
+        for phase in self.cfg.get("phases", []):
+            r_list = phase.get("reinforced_list")
+            if r_list is not None and r_list not in presented_lists:
+                presented_lists.append(r_list)
+        for phase in self.cfg.get("phases", []):
+            for ext_list in phase.get("extinction_lists", []):
+                if ext_list not in presented_lists:
+                    presented_lists.append(ext_list)
+
+        for lst in presented_lists:
+            if not self.running: break
+            phase_words = self.list_manager.vocabulary([lst])
+            if phase_words:
+                self._show_instruction(
+                    "Examine each of the words shown next.", 
+                    phase_words, 
+                    needs_countdown=True, 
+                    title="Instructions"
+                )
+
+        # 3. COMBINED INSTRUCTION BEFORE MAIN PHASES TEST (Top of Column 3)
+        if self.running:
+            self._show_instruction(
+                combined_msg, 
+                [], 
+                needs_countdown=False, 
+                title="Instructions"
+            )
+
+        # 4. MAIN TESTING - SEAMLESS PHASES (Bottom of Column 3)
         self.in_formal_phase = True
         self.phase_trial_count = 0
         self.phase_correct_count = 0
         self.phase_rolling_results = []
+        
         while self.running and self.current_phase_idx < len(self.cfg["phases"]):
             phase = self.current_phase
             reinforced_list = phase.get("reinforced_list")
+            
             if self.current_phase_idx != self._last_printed_phase:
                 self._last_printed_phase = self.current_phase_idx
                 self._notify_phase_change(self._phase_context(phase))
-                lists_to_extract = []
-                if reinforced_list is not None:
-                    lists_to_extract.append(reinforced_list)
-                lists_to_extract.extend(phase.get("extinction_lists", []))
-                phase_words = self.list_manager.vocabulary(lists_to_extract) if lists_to_extract else []
-                msg = instr_cfg.get("between_phases", "Please get ready.")
-                if self.running:
-                    self._show_instruction(msg, phase_words, needs_countdown=True, title="Instructions")
+                # Note: No instructional break here anymore! It flows seamlessly to match the flowchart.
+                
             if self._restart_phase:
                 self._restart_phase = False
                 self._apply_phase_restart()
                 continue
+                
             self._wait_if_paused()
             if not self.running: break
+            
             cycle_start = time.perf_counter()
             self.cycle += 1
             self.phase_trial_count += 1
@@ -485,6 +524,7 @@ class ExperimentRunner:
             transcript = ""
             reinforced = False
             match_result = {"raw": None, "word": None, "list": None, "novel": False, "repeat": False}
+            
             if wav_path is None:
                 self.logger.log_no_response(phase=self.phase_number, phase_attempt=self.current_phase_attempt, cycle=self.cycle, timestamp=cycle_start)
                 self._update_status(response="-")
@@ -500,41 +540,50 @@ class ExperimentRunner:
                     reinforced = should_reinforce(match_result, reinforced_list)
                     self.logger.log_trial(phase=self.phase_number, cycle=self.cycle, timestamp=cycle_start, match_result=match_result, reinforced=reinforced, response_time=response_time, phase_attempt=self.current_phase_attempt)
                     self._update_status(response=word)
+                    
             if reinforced: self.phase_correct_count += 1
             self.phase_rolling_results.append(reinforced)
             window_size = switch_cfg.get("window_size", 10)
             if len(self.phase_rolling_results) > window_size: self.phase_rolling_results.pop(0)
+            
             if self.on_feedback: self.on_feedback(reinforced)
+            
             if reinforced:
                 play_reinforcement(self.reward_path)
                 if self.on_reinforcement:
                     self.on_reinforcement({"phase": self.phase_number, "cycle": self.cycle, "word": match_result["word"], "matched_list": match_result["list"]})
             time.sleep(0.4)
+            
             iti = trial_cfg.get("iti_seconds", 0)
             if iti > 0 and self.running:
                 if self.on_iti: self.on_iti(True)
                 time.sleep(iti)
                 if self.on_iti: self.on_iti(False)
+                
             if self._restart_phase:
                 self._restart_phase = False
                 self._apply_phase_restart()
                 continue
+                
             if self._force_phase_switch:
                 self._force_phase_switch = False
                 switch = True
             else:
                 switch, _ = check_phase_switch(self.phase_trial_count, self.phase_correct_count, self.phase_rolling_results, switch_cfg.get("max_trials", 100), reinforced_list is None, switch_cfg.get("min_correct", 15), window_size, switch_cfg.get("accuracy_threshold", 0.8))
+                
             if switch:
                 self.current_phase_idx += 1
                 self.phase_trial_count = 0
                 self.phase_correct_count = 0
                 self.phase_rolling_results = []
+                
         self.in_formal_phase = False
         self.running = False 
         export = self.cfg["data"].get("export_csv", True)
         self.logger.close(export_csv=export)
         summary = self.logger.get_summary()
         if self.on_complete: self.on_complete(summary)
+        
         end_text = instr_cfg.get("end", "")
         if end_text:
             self._show_instruction(end_text, [], needs_countdown=False, title="Instructions")

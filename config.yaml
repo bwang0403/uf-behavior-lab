@@ -49,19 +49,8 @@ practice:
   enabled: true
   list: "list/list_practice.txt"
   max_trials: 20
-  instruction: |
-    Practice Round.
-    
-    Examine each of the words shown next.
 
 instructions:
-  intro: |
-    Say one word at a time.
-    You will earn points for correct words.
-
-  between_phases: |
-    Please get ready.
-
   end: |
     The experiment is complete.
 
