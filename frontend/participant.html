@@ -133,7 +133,6 @@
   }
 
   .overlay {
-    display: none;
     position: fixed;
     inset: 0;
     z-index: 10;
@@ -143,9 +142,18 @@
     background:
       radial-gradient(circle at 50% 30%, rgba(45, 108, 223, .24), transparent 36%),
       rgba(7, 18, 15, .96);
+    display: flex;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.4s ease, visibility 0.4s ease;
   }
 
-  .overlay.show { display: flex; }
+  .overlay.show {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
 
   .overlay-card {
     width: min(820px, 92vw);
@@ -353,8 +361,6 @@ function flashWordsOneByOne(words, callback) {
 startBtn.addEventListener('click', () => {
   startBtn.style.display = 'none';
   if (!currentNeedsCountdown) {
-    instrOverlay.classList.remove('show');
-    setState('idle', '');
     fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
     return;
   }
@@ -365,13 +371,9 @@ startBtn.addEventListener('click', () => {
   if (currentFlashWords && currentFlashWords.length > 0) {
     let shuffled = shuffle(currentFlashWords);
     flashWordsOneByOne(shuffled, () => {
-      instrOverlay.classList.remove('show');
-      setState('idle', '');
       fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
     });
   } else {
-    instrOverlay.classList.remove('show');
-    setState('idle', '');
     fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
   }
 });
