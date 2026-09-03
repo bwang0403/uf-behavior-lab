@@ -178,7 +178,7 @@
     line-height: 1.5;
     white-space: pre-line;
   }
-  
+
   #flash-zone {
     display: none;
     margin-top: 24px;
@@ -199,12 +199,17 @@
     border-radius: 99px;
     cursor: pointer;
     box-shadow: 0 10px 20px rgba(15, 159, 110, 0.3);
-    transition: transform 0.2s, background-color 0.2s;
+    transition: transform 0.2s, background-color 0.2s, opacity 0.2s;
   }
-  
-  #participant-start-btn:hover {
+
+  #participant-start-btn:hover:not(:disabled) {
     background-color: #0d8a5f;
     transform: translateY(-2px);
+  }
+  
+  #participant-start-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
   }
 
   .flash-word {
@@ -359,15 +364,18 @@ function flashWordsOneByOne(words, callback) {
 }
 
 startBtn.addEventListener('click', () => {
-  startBtn.style.display = 'none';
+  // 分支1：点击 "Continue" 准备进入说话录音阶段
   if (!currentNeedsCountdown) {
+    startBtn.disabled = true; // 🔥 仅禁用防连点。不隐藏它，让它跟着面板平滑淡出！
     fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
     return;
   }
-  
+
+  // 分支2：点击 "Start" 准备开始闪烁词汇
+  startBtn.style.display = 'none'; // 🔥 这里必须立刻隐藏，给后面的闪烁词汇腾出空间
   instrText.style.display = 'none';
   flashZone.style.display = 'flex';
-  
+
   if (currentFlashWords && currentFlashWords.length > 0) {
     let shuffled = shuffle(currentFlashWords);
     flashWordsOneByOne(shuffled, () => {
@@ -430,8 +438,12 @@ function handleEvent(event, data) {
       instrText.style.display = 'block';
       flashZone.style.display = 'none';
       flashZone.innerHTML = '';
+      
+      // 🔥 关键修复：每次展示新面板时，必须把按钮解禁并且显示出来！
+      startBtn.disabled = false; 
       startBtn.textContent = currentNeedsCountdown ? "Start" : "Continue";
       startBtn.style.display = 'inline-block'; 
+      
       instrOverlay.classList.add('show');
       setState('idle', '');
       if (!data.text || data.text.trim() === '') {
@@ -472,7 +484,7 @@ async function poll() {
 
 setState('idle', '');
 renderArc(0);
-poll();
+poll(); 
 </script>
 </body>
 </html>
