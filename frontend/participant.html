@@ -248,6 +248,91 @@
   .fb-incorrect {
     background: #000000;
   }
+
+  #survey-overlay {
+    align-items: flex-start;
+    overflow-y: auto;
+  }
+
+  #survey-overlay .overlay-card {
+    width: min(920px, 94vw);
+    margin: 24px auto;
+    text-align: left;
+  }
+
+  #survey-title {
+    text-align: center;
+  }
+
+  #survey-intro {
+    margin: 18px 0 30px;
+    color: #2f4238;
+    font-size: 20px;
+    line-height: 1.5;
+    text-align: center;
+  }
+
+  .survey-question {
+    margin: 0 0 28px;
+    padding: 0;
+    border: 0;
+  }
+
+  .survey-question legend,
+  .survey-question > label {
+    display: block;
+    margin-bottom: 12px;
+    font-size: 21px;
+    font-weight: bold;
+    line-height: 1.4;
+  }
+
+  .survey-question textarea,
+  .survey-question input[type="text"],
+  .survey-question input[type="number"] {
+    width: 100%;
+    padding: 12px 14px;
+    border: 2px solid #b8c4bd;
+    border-radius: 10px;
+    background: #fff;
+    color: var(--ink);
+    font: inherit;
+    font-size: 19px;
+  }
+
+  .survey-question textarea {
+    min-height: 110px;
+    resize: vertical;
+  }
+
+  .survey-option {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin: 10px 0;
+    font-size: 19px;
+    line-height: 1.35;
+  }
+
+  .survey-option input {
+    width: 20px;
+    height: 20px;
+    margin-top: 2px;
+    flex: 0 0 auto;
+  }
+
+  #survey-submit {
+    display: block;
+    margin: 12px auto 0;
+    padding: 16px 48px;
+    border: 0;
+    border-radius: 99px;
+    background: var(--green);
+    color: #fff;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body data-state="idle">
@@ -281,6 +366,14 @@
 
 <div id="feedback-screen"></div>
 
+<div id="survey-overlay" class="overlay">
+  <div class="overlay-card">
+    <h2 id="survey-title">Final Survey</h2>
+    <p id="survey-intro"></p>
+    <form id="survey-form"></form>
+  </div>
+</div>
+
 <script>
 const CIRC = 2 * Math.PI * 210;
 const arc = document.getElementById('arc');
@@ -292,6 +385,10 @@ const flashZone = document.getElementById('flash-zone');
 const startBtn = document.getElementById('participant-start-btn');
 const feedbackScreen = document.getElementById('feedback-screen');
 const scoreValue = document.getElementById('score-value');
+const surveyOverlay = document.getElementById('survey-overlay');
+const surveyTitle = document.getElementById('survey-title');
+const surveyIntro = document.getElementById('survey-intro');
+const surveyForm = document.getElementById('survey-form');
 
 let windowSeconds = 3;
 let timeLeft = 0;
@@ -302,6 +399,7 @@ let score = 0;
 let currentFlashWords = [];
 let currentNeedsCountdown = false;
 let abortFlash = false;
+let activeSurveyQuestions = [];
 
 function shuffle(array) {
   let arr = [...array];
@@ -363,16 +461,102 @@ function flashWordsOneByOne(words, callback) {
   showNext();
 }
 
+function addSurveyOption(fieldset, question, option, inputType) {
+  const label = document.createElement('label');
+  label.className = 'survey-option';
+  const input = document.createElement('input');
+  input.type = inputType;
+  input.name = question.id;
+  input.value = option;
+  const text = document.createElement('span');
+  text.textContent = option;
+  label.append(input, text);
+  fieldset.appendChild(label);
+}
+
+function showSurvey(survey) {
+  activeSurveyQuestions = Array.isArray(survey.questions) ? survey.questions : [];
+  surveyTitle.textContent = survey.title || 'Final Survey';
+  surveyIntro.textContent = survey.intro || '';
+  surveyForm.innerHTML = '';
+
+  activeSurveyQuestions.forEach((question, index) => {
+    const fieldset = document.createElement('fieldset');
+    fieldset.className = 'survey-question';
+    const labelText = `${index + 1}) ${question.label || ''}`;
+
+    if (question.type === 'single_choice' || question.type === 'multiple_choice') {
+      const legend = document.createElement('legend');
+      legend.textContent = labelText;
+      fieldset.appendChild(legend);
+      const inputType = question.type === 'single_choice' ? 'radio' : 'checkbox';
+      (question.options || []).forEach(option => addSurveyOption(fieldset, question, option, inputType));
+    } else {
+      const label = document.createElement('label');
+      label.htmlFor = `survey-${question.id}`;
+      label.textContent = labelText;
+      fieldset.appendChild(label);
+      const input = question.type === 'textarea' ? document.createElement('textarea') : document.createElement('input');
+      input.id = `survey-${question.id}`;
+      input.name = question.id;
+      input.type = question.type === 'number' ? 'number' : 'text';
+      if (question.type === 'number') {
+        input.min = '0';
+        input.max = '120';
+      }
+      fieldset.appendChild(input);
+    }
+    surveyForm.appendChild(fieldset);
+  });
+
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.id = 'survey-submit';
+  submit.textContent = 'Submit Survey';
+  surveyForm.appendChild(submit);
+  surveyOverlay.classList.add('show');
+}
+
+surveyForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const submit = document.getElementById('survey-submit');
+  submit.disabled = true;
+  const responses = {};
+
+  for (const question of activeSurveyQuestions) {
+    if (question.type === 'multiple_choice') {
+      responses[question.id] = Array.from(surveyForm.querySelectorAll(`input[name="${question.id}"]:checked`)).map(input => input.value);
+    } else if (question.type === 'single_choice') {
+      const selected = surveyForm.querySelector(`input[name="${question.id}"]:checked`);
+      responses[question.id] = selected ? selected.value : '';
+    } else {
+      const input = surveyForm.elements[question.id];
+      responses[question.id] = input ? input.value : '';
+    }
+  }
+
+  try {
+    const response = await fetch('/survey_submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(responses),
+    });
+    if (!response.ok) throw new Error('Survey submission failed');
+    surveyOverlay.classList.remove('show');
+  } catch (error) {
+    console.error(error);
+    submit.disabled = false;
+  }
+});
+
 startBtn.addEventListener('click', () => {
-  // 分支1：点击 "Continue" 准备进入说话录音阶段
   if (!currentNeedsCountdown) {
-    startBtn.disabled = true; // 🔥 仅禁用防连点。不隐藏它，让它跟着面板平滑淡出！
+    startBtn.disabled = true;
     fetch('/participant_continue', { method: 'POST' }).catch(err => console.error(err));
     return;
   }
 
-  // 分支2：点击 "Start" 准备开始闪烁词汇
-  startBtn.style.display = 'none'; // 🔥 这里必须立刻隐藏，给后面的闪烁词汇腾出空间
+  startBtn.style.display = 'none';
   instrText.style.display = 'none';
   flashZone.style.display = 'flex';
 
@@ -427,6 +611,7 @@ function handleEvent(event, data) {
       }, 400);
       break;
     case 'instruction':
+      surveyOverlay.classList.remove('show');
       abortFlash = false;
       clearInterval(timerId);
       renderArc(0);
@@ -439,7 +624,6 @@ function handleEvent(event, data) {
       flashZone.style.display = 'none';
       flashZone.innerHTML = '';
       
-      // 🔥 关键修复：每次展示新面板时，必须把按钮解禁并且显示出来！
       startBtn.disabled = false; 
       startBtn.textContent = currentNeedsCountdown ? "Start" : "Continue";
       startBtn.style.display = 'inline-block'; 
@@ -451,6 +635,11 @@ function handleEvent(event, data) {
           instrText.style.display = 'none';
           startBtn.click();
       }
+      break;
+    case 'survey':
+      stopCycle();
+      instrOverlay.classList.remove('show');
+      showSurvey(data);
       break;
     case 'instruction_done':
       instrOverlay.classList.remove('show');
@@ -464,6 +653,7 @@ function handleEvent(event, data) {
     case 'session_complete':
     case 'session_ended':
     case 'session_stopped':
+      surveyOverlay.classList.remove('show');
       stopCycle();
       setState('idle', '');
       break;

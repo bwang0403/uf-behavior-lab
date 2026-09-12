@@ -192,6 +192,7 @@ class ExperimentRunner:
         self.on_reinforcement = None 
         self.on_phase_change = None  
         self.on_feedback = None
+        self.on_survey = None
         self._pause_event = threading.Event()
         self._pause_event.set()
         self._force_phase_switch = False
@@ -202,6 +203,10 @@ class ExperimentRunner:
         self.in_formal_phase = False
         self._instruction_event = threading.Event()
         self._instruction_event.set()
+        self._survey_event = threading.Event()
+        self._survey_event.set()
+        self._survey_waiting = False
+        self._survey_responses = None
         if model is not None:
             self.model = model
         else:
@@ -250,6 +255,7 @@ class ExperimentRunner:
         self.running = False
         self._pause_event.set()
         self._instruction_event.set()
+        self._survey_event.set()
 
     def pause(self):
         self._pause_event.clear()
@@ -314,6 +320,31 @@ class ExperimentRunner:
 
     def acknowledge_instruction(self):
         self._instruction_event.set()
+
+    @property
+    def survey_is_waiting(self) -> bool:
+        return self._survey_waiting
+
+    def submit_survey(self, responses: dict) -> bool:
+        if not self.running or not self._survey_waiting or not isinstance(responses, dict):
+            return False
+
+        questions = self.cfg.get("survey", {}).get("questions", [])
+        cleaned = {}
+        for question in questions:
+            question_id = str(question.get("id", "")).strip()
+            if not question_id:
+                continue
+            value = responses.get(question_id, "")
+            if isinstance(value, list):
+                cleaned[question_id] = [str(item).strip()[:500] for item in value[:20]]
+            else:
+                cleaned[question_id] = str(value).strip()[:5000]
+
+        self._survey_responses = cleaned
+        self._survey_waiting = False
+        self._survey_event.set()
+        return True
 
     def force_next_phase(self):
         if self.in_practice:
@@ -434,7 +465,7 @@ class ExperimentRunner:
                 else:
                     time.sleep(0.4)
                 
-                if opportunities >= 10 and len(words_said) < len(practice_words):
+                if opportunities >= int(practice_cfg.get("max_trials", 20)) and len(words_said) < len(practice_words):
                     self._restart_practice = True
                     break
                     
@@ -444,6 +475,41 @@ class ExperimentRunner:
         self.in_practice = False
         self._skip_practice = False
         self._restart_practice = False
+
+    def _presentation_list_numbers(self) -> list[int]:
+        """Return protocol presentation order, limited to lists loaded for this group."""
+        presented_lists = []
+        for phase in self.cfg.get("phases", []):
+            reinforced_list = phase.get("reinforced_list")
+            if reinforced_list is not None and reinforced_list not in presented_lists:
+                presented_lists.append(reinforced_list)
+        for phase in self.cfg.get("phases", []):
+            for extinction_list in phase.get("extinction_lists", []):
+                if extinction_list not in presented_lists:
+                    presented_lists.append(extinction_list)
+        return [number for number in presented_lists if number in self.list_manager.full_lists]
+
+    def _run_survey(self):
+        survey_cfg = self.cfg.get("survey", {})
+        questions = survey_cfg.get("questions", [])
+        if not self.running or not survey_cfg.get("enabled", False) or not questions:
+            return
+        if not self.on_survey:
+            return
+
+        self._survey_responses = None
+        self._survey_waiting = True
+        self._survey_event.clear()
+        self.on_survey({
+            "title": survey_cfg.get("title", "Final Survey"),
+            "intro": survey_cfg.get("intro", ""),
+            "questions": questions,
+        })
+        self._survey_event.wait()
+        self._survey_waiting = False
+
+        if self._survey_responses is not None:
+            self.logger.log_survey_responses(self._survey_responses)
 
     def run(self):
         self.running = True
@@ -463,17 +529,7 @@ class ExperimentRunner:
             self._run_practice(combined_msg)
 
         # 2. PRESENT ALL MAIN LISTS SEQUENTIALLY (Column 2 of Flowchart)
-        presented_lists = []
-        for phase in self.cfg.get("phases", []):
-            r_list = phase.get("reinforced_list")
-            if r_list is not None and r_list not in presented_lists:
-                presented_lists.append(r_list)
-        for phase in self.cfg.get("phases", []):
-            for ext_list in phase.get("extinction_lists", []):
-                if ext_list not in presented_lists:
-                    presented_lists.append(ext_list)
-
-        for lst in presented_lists:
+        for lst in self._presentation_list_numbers():
             if not self.running: break
             phase_words = self.list_manager.vocabulary([lst])
             if phase_words:
@@ -578,15 +634,22 @@ class ExperimentRunner:
                 self.phase_rolling_results = []
                 
         self.in_formal_phase = False
-        self.running = False 
+
+        # The survey is part of the session and therefore comes before completion/export.
+        if self.running:
+            self._run_survey()
+
+        end_text = instr_cfg.get("end", "")
+        if self.running and end_text:
+            self._show_instruction(end_text, [], needs_countdown=False, title="Instructions")
+
         export = self.cfg["data"].get("export_csv", True)
         self.logger.close(export_csv=export)
         summary = self.logger.get_summary()
-        if self.on_complete: self.on_complete(summary)
-        
-        end_text = instr_cfg.get("end", "")
-        if end_text:
-            self._show_instruction(end_text, [], needs_countdown=False, title="Instructions")
+        summary["survey_submitted"] = self._survey_responses is not None
+        self.running = False
+        if self.on_complete:
+            self.on_complete(summary)
 
     def _update_status(self, response: str):
         if self.on_status:

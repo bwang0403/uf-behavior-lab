@@ -10,6 +10,8 @@ Tables:
 import sqlite3
 import csv
 import time
+import json
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
 
@@ -46,6 +48,17 @@ CREATE TABLE IF NOT EXISTS trials (
 );
 """
 
+CREATE_SURVEY_RESPONSES = """
+CREATE TABLE IF NOT EXISTS survey_responses (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT,
+    question_id     TEXT,
+    response        TEXT,
+    submitted_at    TEXT,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+);
+"""
+
 
 # ─── Logger ───────────────────────────────────────────────────────────────────
 
@@ -64,13 +77,24 @@ class SessionLogger:
         self._init_db()
         self._create_session()
 
+    @contextmanager
     def _connect(self):
-        return sqlite3.connect(self.db_path)
+        """Provide a transaction and always release the SQLite file handle."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self):
         with self._connect() as conn:
             conn.execute(CREATE_SESSIONS)
             conn.execute(CREATE_TRIALS)
+            conn.execute(CREATE_SURVEY_RESPONSES)
             self._migrate_trials(conn)
 
     def _migrate_trials(self, conn):
@@ -143,6 +167,28 @@ class SessionLogger:
                 (self.session_id, phase, phase_attempt),
             )
 
+    def log_survey_responses(self, responses: dict):
+        """Store one submitted survey, including intentionally blank answers."""
+        submitted_at = datetime.now().isoformat()
+        rows = []
+        for question_id, response in responses.items():
+            if isinstance(response, list):
+                response_text = json.dumps(response, ensure_ascii=False)
+            elif response is None:
+                response_text = ""
+            else:
+                response_text = str(response)
+            rows.append((self.session_id, str(question_id), response_text, submitted_at))
+
+        with self._connect() as conn:
+            conn.execute("DELETE FROM survey_responses WHERE session_id=?", (self.session_id,))
+            conn.executemany(
+                """INSERT INTO survey_responses
+                   (session_id, question_id, response, submitted_at)
+                   VALUES (?,?,?,?)""",
+                rows,
+            )
+
     def close(self, export_csv: bool = True) -> str | None:
         """Mark session as ended and optionally export CSV. Returns CSV path."""
         ended_at = datetime.now().isoformat()
@@ -153,7 +199,9 @@ class SessionLogger:
             )
 
         if export_csv:
-            return self._export_csv()
+            trial_csv = self._export_csv()
+            self._export_survey_csv()
+            return trial_csv
         return None
 
     def get_summary(self) -> dict:
@@ -219,6 +267,31 @@ class SessionLogger:
             writer.writerow(cols)
             writer.writerows(rows)
 
+        return csv_path
+
+    def _export_survey_csv(self) -> str | None:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT question_id, response, submitted_at "
+                "FROM survey_responses WHERE session_id=? ORDER BY id",
+                (self.session_id,),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        csv_path = str(Path(self.db_path).parent / f"{self.session_id}_survey.csv")
+        with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(["session_id", "participant", "question_id", "response", "submitted_at"])
+            for question_id, response, submitted_at in rows:
+                writer.writerow([
+                    self.session_id,
+                    self.participant_id,
+                    question_id,
+                    response,
+                    submitted_at,
+                ])
         return csv_path
 
 

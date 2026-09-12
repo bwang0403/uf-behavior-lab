@@ -30,7 +30,7 @@ lists:
   path: "list/"
   list1: "list1_animals.txt"
   list2: "list2_professions.txt"
-  list3: "list3_foods.txt"
+  list3: "list3_food.txt"
 
 audio:
   reinforcement_sound: "audio/reward.wav"
@@ -55,6 +55,46 @@ instructions:
     The experiment is complete.
 
     Thank you for your participation!
+
+survey:
+  enabled: true
+  title: "Final Survey"
+  intro: "Please answer the following questions. You may leave any question blank if you prefer not to answer."
+  questions:
+    - id: "overall_purpose"
+      type: "textarea"
+      label: "What do you think was the overall purpose of the study you just completed? If you do not know, please feel free to respond, I don't know. Leave the question blank if you prefer not to answer."
+    - id: "strategy"
+      type: "textarea"
+      label: "Please describe your overall strategy that you used throughout the study. If you did not have a strategy, please feel free to respond, I did not have a strategy. Leave the question blank if you prefer not to answer."
+    - id: "other_experience"
+      type: "textarea"
+      label: "If there is any other information you wish to explain about your experience during the study, please describe here:"
+    - id: "age"
+      type: "number"
+      label: "How old are you?"
+    - id: "gender"
+      type: "single_choice"
+      label: "What is your gender?"
+      options:
+        - "Genderqueer, Non-binary, Genderfluid"
+        - "Prefer not to say"
+        - "Man"
+        - "Woman"
+    - id: "nationality"
+      type: "text"
+      label: "What is your nationality?"
+    - id: "race_ethnicity"
+      type: "multiple_choice"
+      label: "What is your race/ethnicity?"
+      options:
+        - "Asian"
+        - "Black or African American"
+        - "Hispanic or Latino (of any race)"
+        - "Indigenous"
+        - "Native American or Alaskan Native"
+        - "Native Hawaiian or Pacific Islander"
+        - "White"
 
 data:
   db_path: "data/resurgence.db"

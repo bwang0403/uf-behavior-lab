@@ -60,6 +60,15 @@ def participant_continue():
     _push("instruction_done")
     return jsonify({"ok": True})
 
+@app.route("/survey_submit", methods=["POST"])
+def survey_submit():
+    global _runner
+    responses = request.get_json(silent=True) or {}
+    if _runner is None or not _runner.submit_survey(responses):
+        return jsonify({"error": "The survey is not currently accepting responses."}), 409
+    _push("survey_done")
+    return jsonify({"ok": True})
+
 @app.route("/cmd/<action>", methods=["POST"])
 def cmd(action):
     global _runner
@@ -90,6 +99,7 @@ def cmd(action):
         _runner.on_reinforcement = lambda info: _push("reinforcement", info)
         _runner.on_phase_change = lambda info:  _push("phase_change", info)
         _runner.on_feedback    = lambda correct: _push("feedback", {"correct": correct})
+        _runner.on_survey      = lambda survey: _push("survey", survey)
 
         def _run():
             global _runner
